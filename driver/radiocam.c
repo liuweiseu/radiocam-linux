@@ -109,33 +109,54 @@ static int radocam_read_reg(struct i2c_client *client, u8 dev_id, u32 addr, u32 
 }
 
 /* Write registers up to 4 at a time */
-static int radiocam_write_reg(struct i2c_client *client, u16 reg, u32 len, u32 val)
+static int radiocam_write_reg(struct i2c_client *client, u8 dev_id, u32 addr, u32 val)
 {
-    u32 buf_i, val_i;
-    u8 buf[6];
-    u8 *val_p;
-    __be32 val_be;
+    dev_dbg(&client->dev, "(dbg)write reg(0x%x, 0x%x): 0x%x\n", dev_id, addr, val);
+    struct i2c_msg msgs[1];
+    u8 tx_buf[10];
+    u8 rx_buf[4];
+    int ret;
+    tx_buf[0] = dev_id;
+    tx_buf[1] = 0;
+    tx_buf[2] = (addr >> 24) & 0xff;
+    tx_buf[3] = (addr >> 16) & 0xff;
+    tx_buf[4] = (addr >> 8) & 0xff;
+    tx_buf[5] = (addr >> 0) & 0xff;
+    tx_buf[6] = (val >> 24) & 0xff;
+    tx_buf[7] = (val >> 16) & 0xff;
+    tx_buf[8] = (val >> 8) & 0xff;
+    tx_buf[9] = (val >> 0) & 0xff;
 
-    dev_dbg(&client->dev, "write reg(0x%x val:0x%x)!\n", reg, val);
-
-    if (len > 4)
-        return -EINVAL;
-
-    buf[0] = reg >> 8;
-    buf[1] = reg & 0xff;
-
-    val_be = cpu_to_be32(val);
-    val_p = (u8 *)&val_be;
-    buf_i = 2;
-    val_i = 4 - len;
-
-    while (val_i < 4)
-        buf[buf_i++] = val_p[val_i++];
-
-    if (i2c_master_send(client, buf, len + 2) != len + 2)
+    /* Write register address */
+    msgs[0].addr = client->addr;
+    msgs[0].flags = 0;
+    msgs[0].len = 10;
+    msgs[0].buf = tx_buf;
+    ret = i2c_transfer(client->adapter, msgs, ARRAY_SIZE(msgs));
+    if (ret != ARRAY_SIZE(msgs))
         return -EIO;
-
-    return 0;
+    /* wait for 2ms */
+    usleep_range(2000, 2500);
+    /* Read data from register */
+    msgs[0].addr = client->addr;
+    msgs[0].flags = I2C_M_RD;
+    msgs[0].len = 4;
+    msgs[0].buf = rx_buf;
+    ret = i2c_transfer(client->adapter, msgs, ARRAY_SIZE(msgs));
+    if (ret != ARRAY_SIZE(msgs))
+        return -EIO;
+    dev_dbg(&client->dev, "(dbg)Write reg - return Val: 0x%x\n", *(u32 *)rx_buf);
+    if (rx_buf[0] == dev_id)
+    {
+        dev_dbg(&client->dev, "(dbg)Write reg successfully");
+        return 0;
+    }
+    else
+    {
+        dev_err(&client->dev, "Write reg(0x%x, 0x%x): 0x%x failed", dev_id, addr, val);
+        // should we return -EIO here??
+        return -EIO;
+    }
 }
 
 /*
@@ -187,6 +208,7 @@ static int radiocam_probe(struct i2c_client *client,
     u32 val;
     radocam_read_reg(client, 0x05, 0x00, &val);
     dev_info(&client->dev, "Read reg(0x%x, 0x%x): 0x%x\n", 05, 0, val);
+    radiocam_write_reg(client, 0x01, 0x01, 0);
     return 0;
 }
 
