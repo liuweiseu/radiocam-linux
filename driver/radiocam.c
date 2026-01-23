@@ -104,6 +104,7 @@ static int radocam_read_reg(struct i2c_client *client, u8 dev_id, u32 addr, u32 
     ret = i2c_transfer(client->adapter, msgs, ARRAY_SIZE(msgs));
     if (ret != ARRAY_SIZE(msgs))
         return -EIO;
+    dev_dbg(&client->dev, "(dbg)Read reg(0x%x, 0x%x): 0x%x\n", dev_id, addr, *val);
     return 0;
 }
 
@@ -184,8 +185,8 @@ static int radiocam_probe(struct i2c_client *client,
     // save i2c client to radiocam struct
     radiocam->client = client;
     u32 val;
-    radocam_read_reg(client, 0x06, 0x00, &val);
-    dev_info(&client->dev, "Read reg(0x%x, 0x%x): 0x%x\n", 06, 0, val);
+    radocam_read_reg(client, 0x05, 0x00, &val);
+    dev_info(&client->dev, "Read reg(0x%x, 0x%x): 0x%x\n", 05, 0, val);
     return 0;
 }
 
