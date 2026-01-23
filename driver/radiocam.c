@@ -25,60 +25,167 @@
 #include <media/v4l2-subdev.h>
 #include <linux/pinctrl/consumer.h>
 
-#define RADIOCAM_NAME			"radiocam"
+#define DEBUG
+
+#define RADIOCAM_NAME "radiocam"
+#define DRIVER_VERSION KERNEL_VERSION(0, 0x00, 0x01)
 
 #if IS_ENABLED(CONFIG_OF)
 static const struct of_device_id radiocam_of_match[] = {
-	{ .compatible = "ucb-ral,radiocam" },
-	{},
+    {.compatible = "ucb-ral,radiocam"},
+    {},
 };
 MODULE_DEVICE_TABLE(of, radiocam_of_match);
 #endif
 
-/*
-* function: radiocam_runtime_suspend
-* brief: power management
-*/
-static int __maybe_unused radiocam_runtime_suspend(struct device *dev)
+struct radiocam
 {
-	// struct i2c_client *client = to_i2c_client(dev);
-	// struct v4l2_subdev *sd = i2c_get_clientdata(client);
-	// struct ov13850 *ov13850 = to_ov13850(sd);
+    struct i2c_client *client;
+    struct clk *xvclk;
+    struct gpio_desc *power_gpio;
+    struct gpio_desc *reset_gpio;
+    struct gpio_desc *pwdn_gpio;
+    // struct  regulator_bulk_data supplies[OV13850_NUM_SUPPLIES];
 
-	// __ov13850_power_off(ov13850);
-    // TODO: implement this function
-	return 0;
+    struct pinctrl *pinctrl;
+    struct pinctrl_state *pins_default;
+    struct pinctrl_state *pins_sleep;
+
+    struct v4l2_subdev subdev;
+    struct media_pad pad;
+    struct v4l2_ctrl_handler ctrl_handler;
+    struct v4l2_ctrl *exposure;
+    struct v4l2_ctrl *anal_gain;
+    struct v4l2_ctrl *digi_gain;
+    struct v4l2_ctrl *hblank;
+    struct v4l2_ctrl *vblank;
+    struct v4l2_ctrl *test_pattern;
+    struct mutex mutex;
+    bool streaming;
+    bool power_on;
+    const struct ov13850_mode *cur_mode;
+    u32 module_index;
+    const char *module_facing;
+    const char *module_name;
+    const char *len_name;
+};
+
+/* Read register*/
+static int radocam_read_reg(struct i2c_client *client, u8 dev_id, u32 addr, u32 *val)
+{
+    struct i2c_msg msgs[1];
+    int ret;
+    u8 tx_buf[10];
+    u8 *rx_buf = (u8 *)val;
+    // take a look at the protocol here:
+    // https://github.com/liuweiseu/hercules-i2c-demo/wiki/com-protocol
+    tx_buf[0] = dev_id;
+    tx_buf[1] = 0;
+    tx_buf[2] = (addr >> 24) & 0xff;
+    tx_buf[3] = (addr >> 16) & 0xff;
+    tx_buf[4] = (addr >> 8) & 0xff;
+    tx_buf[5] = (addr >> 0) & 0xff;
+
+    /* Write register address */
+    msgs[0].addr = client->addr;
+    msgs[0].flags = 0;
+    msgs[0].len = 10;
+    msgs[0].buf = tx_buf;
+    ret = i2c_transfer(client->adapter, msgs, ARRAY_SIZE(msgs));
+    if (ret != ARRAY_SIZE(msgs))
+        return -EIO;
+    /* wait for 2ms */
+    usleep_range(2000, 2500);
+    /* Read data from register */
+    msgs[0].addr = client->addr;
+    msgs[0].flags = I2C_M_RD;
+    msgs[0].len = 4;
+    msgs[0].buf = rx_buf;
+    ret = i2c_transfer(client->adapter, msgs, ARRAY_SIZE(msgs));
+    if (ret != ARRAY_SIZE(msgs))
+        return -EIO;
+    return 0;
+}
+
+/* Write registers up to 4 at a time */
+static int radiocam_write_reg(struct i2c_client *client, u16 reg, u32 len, u32 val)
+{
+    u32 buf_i, val_i;
+    u8 buf[6];
+    u8 *val_p;
+    __be32 val_be;
+
+    dev_dbg(&client->dev, "write reg(0x%x val:0x%x)!\n", reg, val);
+
+    if (len > 4)
+        return -EINVAL;
+
+    buf[0] = reg >> 8;
+    buf[1] = reg & 0xff;
+
+    val_be = cpu_to_be32(val);
+    val_p = (u8 *)&val_be;
+    buf_i = 2;
+    val_i = 4 - len;
+
+    while (val_i < 4)
+        buf[buf_i++] = val_p[val_i++];
+
+    if (i2c_master_send(client, buf, len + 2) != len + 2)
+        return -EIO;
+
+    return 0;
 }
 
 /*
-* function: radiocam_runtime_resume
-* brief: power management
-*/
+ * function: radiocam_runtime_suspend
+ * brief: power management
+ */
+static int __maybe_unused radiocam_runtime_suspend(struct device *dev)
+{
+    // TODO: implement this function
+    return 0;
+}
+
+/*
+ * function: radiocam_runtime_resume
+ * brief: power management
+ */
 static int __maybe_unused radiocam_runtime_resume(struct device *dev)
 {
-	// struct i2c_client *client = to_i2c_client(dev);
-	// struct v4l2_subdev *sd = i2c_get_clientdata(client);
-	// struct ov13850 *ov13850 = to_ov13850(sd);
-
-	// return __ov13850_power_on(ov13850);
     // TODO: implement this function
     return 0;
 }
 
 static const struct i2c_device_id radiocam_match_id[] = {
-	{ "ucb-ral,radiocam", 0 },
-	{ },
+    {"ucb-ral,radiocam", 0},
+    {},
 };
 
 static const struct dev_pm_ops radiocam_pm_ops = {
-	SET_RUNTIME_PM_OPS(radiocam_runtime_suspend,
-			   radiocam_runtime_resume, NULL)
-};
+    SET_RUNTIME_PM_OPS(radiocam_runtime_suspend,
+                       radiocam_runtime_resume, NULL)};
 
 static int radiocam_probe(struct i2c_client *client,
-			 const struct i2c_device_id *id)
+                          const struct i2c_device_id *id)
 {
-    printk("Hello World!\n");
+    struct device *dev = &client->dev;
+    struct device_node *node = dev->of_node;
+    struct radiocam *radiocam;
+    struct v4l2_subdev *sd;
+    // print out the driver version
+    dev_info(dev, "driver version: %02x.%02x.%02x",
+             DRIVER_VERSION >> 16,
+             (DRIVER_VERSION & 0xff00) >> 8,
+             DRIVER_VERSION & 0x00ff);
+    radiocam = devm_kzalloc(dev, sizeof(*radiocam), GFP_KERNEL);
+    if (!radiocam)
+        return -ENOMEM;
+    // save i2c client to radiocam struct
+    radiocam->client = client;
+    u32 val;
+    radocam_read_reg(client, 0x06, 0x00, &val);
+    dev_info(&client->dev, "Read reg(0x%x, 0x%x): 0x%x\n", 06, 0, val);
     return 0;
 }
 
@@ -88,26 +195,26 @@ static void radiocam_remove(struct i2c_client *client)
 }
 
 static struct i2c_driver radiocam_i2c_driver = {
-	.driver = {
-		.name = RADIOCAM_NAME,
-		.pm = &radiocam_pm_ops,
-		.of_match_table = of_match_ptr(radiocam_of_match),
-	},
-	.probe		= &radiocam_probe,
-	.remove		= &radiocam_remove,
-	.id_table	= radiocam_match_id,
+    .driver = {
+        .name = RADIOCAM_NAME,
+        .pm = &radiocam_pm_ops,
+        .of_match_table = of_match_ptr(radiocam_of_match),
+    },
+    .probe = &radiocam_probe,
+    .remove = &radiocam_remove,
+    .id_table = radiocam_match_id,
 };
 
 static int __init sensor_mod_init(void)
-{   
+{
     printk("RadioCam Driver Loaded.\n");
-	return i2c_add_driver(&radiocam_i2c_driver);
+    return i2c_add_driver(&radiocam_i2c_driver);
 }
 
 static void __exit sensor_mod_exit(void)
 {
     printk("RadioCam Driver Unloaded.\n");
-	i2c_del_driver(&radiocam_i2c_driver);
+    i2c_del_driver(&radiocam_i2c_driver);
 }
 
 device_initcall_sync(sensor_mod_init);
