@@ -24,7 +24,7 @@
 #include <media/v4l2-ctrls.h>
 #include <media/v4l2-subdev.h>
 #include <linux/pinctrl/consumer.h>
-
+#include "radiocam.h"
 #define DEBUG
 
 #define RADIOCAM_NAME "radiocam"
@@ -63,12 +63,14 @@ struct radiocam
     struct mutex mutex;
     bool streaming;
     bool power_on;
-    const struct ov13850_mode *cur_mode;
+    // const struct ov13850_mode *cur_mode;
     u32 module_index;
     const char *module_facing;
     const char *module_name;
     const char *len_name;
 };
+
+#define to_radiocam(sd) container_of(sd, struct radiocam, subdev)
 
 /* Read register*/
 static int radocam_read_reg(struct i2c_client *client, u8 dev_id, u32 addr, u32 *val)
@@ -179,6 +181,203 @@ static int __maybe_unused radiocam_runtime_resume(struct device *dev)
     return 0;
 }
 
+/*
+ * core ops
+ */
+static int radiocam_s_power(struct v4l2_subdev *sd, int on)
+{
+    struct radiocam *radiocam = to_radiocam(sd);
+    struct i2c_client *client = radiocam->client;
+    int ret = 0;
+
+    mutex_lock(&radiocam->mutex);
+    // TODO: TO be implemented
+
+unlock_and_return:
+    mutex_unlock(&radiocam->mutex);
+
+    return ret;
+}
+
+static long radiocam_ioctl(struct v4l2_subdev *sd, unsigned int cmd, void *arg)
+{
+    struct radiocam *radiocam = to_radiocam(sd);
+    long ret = 0;
+    u32 stream = 0;
+
+    switch (cmd)
+    {
+    case RADIOCAM_GET_STATUS:
+        dev_dbg(&radiocam->client->dev, "RADIOCAM_GET_STATUS");
+        break;
+    case RADIOCAM_SET_MODE:
+        dev_dbg(&radiocam->client->dev, "RADIOCAM_SET_MODE");
+        break;
+    default:
+        ret = -ENOIOCTLCMD;
+        break;
+    }
+
+    return ret;
+}
+
+// #ifdef CONFIG_COMPAT
+// static long radiocam_compat_ioctl32(struct v4l2_subdev *sd,
+//                                     unsigned int cmd, unsigned long arg)
+// {
+//     void __user *up = compat_ptr(arg);
+//     long ret;
+//     u32 stream = 0;
+
+//     switch (cmd)
+//     {
+//     case RKMODULE_GET_MODULE_INFO:
+//         inf = kzalloc(sizeof(*inf), GFP_KERNEL);
+//         if (!inf)
+//         {
+//             ret = -ENOMEM;
+//             return ret;
+//         }
+
+//         ret = radiocam_ioctl(sd, cmd, inf);
+//         if (!ret)
+//             ret = copy_to_user(up, inf, sizeof(*inf));
+//         kfree(inf);
+//         break;
+//     case RKMODULE_AWB_CFG:
+//         cfg = kzalloc(sizeof(*cfg), GFP_KERNEL);
+//         if (!cfg)
+//         {
+//             ret = -ENOMEM;
+//             return ret;
+//         }
+
+//         ret = copy_from_user(cfg, up, sizeof(*cfg));
+//         if (!ret)
+//             ret = ov13850_ioctl(sd, cmd, cfg);
+//         kfree(cfg);
+//         break;
+//     case RKMODULE_SET_QUICK_STREAM:
+//         ret = copy_from_user(&stream, up, sizeof(u32));
+//         if (!ret)
+//             ret = ov13850_ioctl(sd, cmd, &stream);
+//         break;
+//     default:
+//         ret = -ENOIOCTLCMD;
+//         break;
+//     }
+
+//     return ret;
+// }
+// #endif
+
+static int radiocam_s_stream(struct v4l2_subdev *sd, int on)
+{
+    struct radiocam *radiocam = to_radiocam(sd);
+    struct i2c_client *client = radiocam->client;
+    int ret = 0;
+
+    mutex_lock(&radiocam->mutex);
+    // TODO: to be implemented
+unlock_and_return:
+    mutex_unlock(&radiocam->mutex);
+
+    return ret;
+}
+
+static int radiocam_g_frame_interval(struct v4l2_subdev *sd,
+                                     struct v4l2_subdev_frame_interval *fi)
+{
+    struct radiocam *radiocam = to_radiocam(sd);
+    // TODO: to be implemented
+    return 0;
+}
+
+static int radiocam_enum_mbus_code(struct v4l2_subdev *sd,
+                                   struct v4l2_subdev_state *sd_state,
+                                   struct v4l2_subdev_mbus_code_enum *code)
+{
+    // TODO: to be implemented
+
+    return 0;
+}
+
+static int radiocam_enum_frame_sizes(struct v4l2_subdev *sd,
+                                     struct v4l2_subdev_state *sd_state,
+                                     struct v4l2_subdev_frame_size_enum *fse)
+{
+    // TODO: to be implemented
+    return 0;
+}
+
+static int radiocam_enum_frame_interval(struct v4l2_subdev *sd,
+                                        struct v4l2_subdev_state *sd_state,
+                                        struct v4l2_subdev_frame_interval_enum *fie)
+{
+    // TODO: to be implemented
+    return 0;
+}
+
+static int radiocam_get_fmt(struct v4l2_subdev *sd,
+                            struct v4l2_subdev_state *sd_state,
+                            struct v4l2_subdev_format *fmt)
+{
+    struct radiocam *radiocam = to_radiocam(sd);
+
+    mutex_lock(&radiocam->mutex);
+    // TODO: to be implemented
+    mutex_unlock(&radiocam->mutex);
+
+    return 0;
+}
+
+static int radiocam_set_fmt(struct v4l2_subdev *sd,
+                            struct v4l2_subdev_state *sd_state,
+                            struct v4l2_subdev_format *fmt)
+{
+    struct radiocam *radiocam = to_radiocam(sd);
+    mutex_lock(&radiocam->mutex);
+    // TODO: to be implemented
+    mutex_unlock(&radiocam->mutex);
+
+    return 0;
+}
+
+static int radiocam_g_mbus_config(struct v4l2_subdev *sd, unsigned int pad_id,
+                                  struct v4l2_mbus_config *config)
+{
+    // TODO: to be implemented
+    return 0;
+}
+
+static const struct v4l2_subdev_core_ops radiocam_core_ops = {
+    .s_power = radiocam_s_power,
+    .ioctl = radiocam_ioctl,
+    // #ifdef CONFIG_COMPAT
+    //     .compat_ioctl32 = radiocam_compat_ioctl32,
+    // #endif
+};
+
+static const struct v4l2_subdev_video_ops radiocam_video_ops = {
+    .s_stream = radiocam_s_stream,
+    .g_frame_interval = radiocam_g_frame_interval,
+};
+
+static const struct v4l2_subdev_pad_ops radiocam_pad_ops = {
+    .enum_mbus_code = radiocam_enum_mbus_code,
+    .enum_frame_size = radiocam_enum_frame_sizes,
+    .enum_frame_interval = radiocam_enum_frame_interval,
+    .get_fmt = radiocam_get_fmt,
+    .set_fmt = radiocam_set_fmt,
+    .get_mbus_config = radiocam_g_mbus_config,
+};
+
+static const struct v4l2_subdev_ops radiocam_subdev_ops = {
+    .core = &radiocam_core_ops,
+    .video = &radiocam_video_ops,
+    .pad = &radiocam_pad_ops,
+};
+
 static const struct i2c_device_id radiocam_match_id[] = {
     {"ucb-ral,radiocam", 0},
     {},
@@ -205,16 +404,32 @@ static int radiocam_probe(struct i2c_client *client,
         return -ENOMEM;
     // save i2c client to radiocam struct
     radiocam->client = client;
-    u32 val;
-    radocam_read_reg(client, 0x05, 0x00, &val);
-    dev_info(&client->dev, "Read reg(0x%x, 0x%x): 0x%x\n", 05, 0, val);
-    radiocam_write_reg(client, 0x01, 0x01, 0);
+    /*************  For Test **********************/
+    // u32 val;
+    // radocam_read_reg(client, 0x05, 0x00, &val);
+    // dev_info(&client->dev, "Read reg(0x%x, 0x%x): 0x%x\n", 05, 0, val);
+    // radiocam_write_reg(client, 0x01, 0x01, 0);
+    /**********************************************/
+    // init a mutex
+    mutex_init(&radiocam->mutex);
+    // init the i2c device to a v4l2 subdev
+    sd = &radiocam->subdev;
+    v4l2_i2c_subdev_init(sd, client, &radiocam_subdev_ops);
     return 0;
 }
 
 static void radiocam_remove(struct i2c_client *client)
 {
     printk("Bye!\n");
+
+    struct v4l2_subdev *sd = i2c_get_clientdata(client);
+    struct radiocam *radiocam = to_radiocam(sd);
+    v4l2_async_unregister_subdev(sd);
+#if defined(CONFIG_MEDIA_CONTROLLER)
+    media_entity_cleanup(&sd->entity);
+#endif
+    v4l2_ctrl_handler_free(&radiocam->ctrl_handler);
+    mutex_destroy(&radiocam->mutex);
 }
 
 static struct i2c_driver radiocam_i2c_driver = {
