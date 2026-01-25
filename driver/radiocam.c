@@ -474,8 +474,7 @@ static int radiocam_probe(struct i2c_client *client,
     ret = v4l2_device_register_subdev_nodes(&radiocam->v4l2_dev);
     if (ret)
     {
-        dev_err(dev, "Failed to register subdev nodes: %d\n",
-                ret);
+        dev_err(dev, "Failed to register subdev nodes: %d\n", ret);
     }
 
     dev_info(dev, "radiocam subdev registered with devnode\n");
@@ -485,21 +484,21 @@ static int radiocam_probe(struct i2c_client *client,
         dev_warn(dev, "subdev devnode not created\n");
     return 0;
 
-err_clean_entity:
-#if defined(CONFIG_MEDIA_CONTROLLER)
-    media_entity_cleanup(&sd->entity);
-#endif
 err_subdev:
     v4l2_device_unregister_subdev(sd);
 err_v4l2:
     v4l2_device_unregister(&radiocam->v4l2_dev);
+err_clean_entity:
+#if defined(CONFIG_MEDIA_CONTROLLER)
+    media_entity_cleanup(&sd->entity);
+#endif
     return ret;
 }
 
 static void radiocam_remove(struct i2c_client *client)
 {
-    struct radiocam *radiocam = i2c_get_clientdata(client);
-    struct v4l2_subdev *sd = &radiocam->subdev;
+    struct v4l2_subdev *sd = i2c_get_clientdata(client);
+    struct radiocam *radiocam = to_radiocam(sd);
 
     v4l2_device_unregister_subdev(sd);
     v4l2_device_unregister(&radiocam->v4l2_dev);
