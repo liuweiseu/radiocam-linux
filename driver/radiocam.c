@@ -24,8 +24,8 @@
 #include <media/v4l2-ctrls.h>
 #include <media/v4l2-subdev.h>
 #include <linux/pinctrl/consumer.h>
+#include <media/v4l2-device.h>
 #include "radiocam.h"
-#define DEBUG
 
 #define RADIOCAM_NAME "radiocam"
 #define DRIVER_VERSION KERNEL_VERSION(0, 0x00, 0x01)
@@ -68,6 +68,9 @@ struct radiocam
     const char *module_facing;
     const char *module_name;
     const char *len_name;
+    struct v4l2_device v4l2_dev;
+    struct video_device video_dev;
+    struct media_device media_dev;
 };
 
 #define to_radiocam(sd) container_of(sd, struct radiocam, subdev)
@@ -378,6 +381,40 @@ static const struct v4l2_subdev_ops radiocam_subdev_ops = {
     .pad = &radiocam_pad_ops,
 };
 
+#ifdef CONFIG_VIDEO_V4L2_SUBDEV_API
+static int radiocam_open(struct v4l2_subdev *sd, struct v4l2_subdev_fh *fh)
+{
+    struct radiocam *radiocam = to_radiocam(sd);
+    struct v4l2_mbus_framefmt *try_fmt =
+        v4l2_subdev_get_try_format(sd, fh->state, 0);
+    // const struct ov13850_mode *def_mode = &supported_modes[0];
+
+    mutex_lock(&radiocam->mutex);
+    /* Initialize try_fmt */
+    // try_fmt->width = def_mode->width;
+    // try_fmt->height = def_mode->height;
+    try_fmt->width = 0;
+    try_fmt->height = 0;
+    try_fmt->code = MEDIA_BUS_FMT_SBGGR10_1X10;
+    try_fmt->field = V4L2_FIELD_NONE;
+
+    mutex_unlock(&radiocam->mutex);
+    /* No crop or compose */
+
+    return 0;
+}
+#endif
+
+#ifdef CONFIG_VIDEO_V4L2_SUBDEV_API
+static const struct v4l2_subdev_internal_ops radiocam_internal_ops = {
+    .open = radiocam_open,
+};
+#endif
+
+/*
+*********************** probe and remove functions *************************
+*/
+
 static const struct i2c_device_id radiocam_match_id[] = {
     {"ucb-ral,radiocam", 0},
     {},
@@ -391,45 +428,87 @@ static int radiocam_probe(struct i2c_client *client,
                           const struct i2c_device_id *id)
 {
     struct device *dev = &client->dev;
-    struct device_node *node = dev->of_node;
     struct radiocam *radiocam;
     struct v4l2_subdev *sd;
-    // print out the driver version
+    int ret;
+
     dev_info(dev, "driver version: %02x.%02x.%02x",
              DRIVER_VERSION >> 16,
              (DRIVER_VERSION & 0xff00) >> 8,
              DRIVER_VERSION & 0x00ff);
+
     radiocam = devm_kzalloc(dev, sizeof(*radiocam), GFP_KERNEL);
     if (!radiocam)
         return -ENOMEM;
+
     // save i2c client to radiocam struct
     radiocam->client = client;
-    /*************  For Test **********************/
-    // u32 val;
-    // radocam_read_reg(client, 0x05, 0x00, &val);
-    // dev_info(&client->dev, "Read reg(0x%x, 0x%x): 0x%x\n", 05, 0, val);
-    // radiocam_write_reg(client, 0x01, 0x01, 0);
-    /**********************************************/
-    // init a mutex
     mutex_init(&radiocam->mutex);
-    // init the i2c device to a v4l2 subdev
+
     sd = &radiocam->subdev;
     v4l2_i2c_subdev_init(sd, client, &radiocam_subdev_ops);
+    strscpy(sd->name, "radiocam-subdev", sizeof(sd->name));
+#ifdef CONFIG_VIDEO_V4L2_SUBDEV_API
+    sd->internal_ops = &radiocam_internal_ops;
+    sd->flags |= V4L2_SUBDEV_FL_HAS_DEVNODE;
+#endif
+
+#if defined(CONFIG_MEDIA_CONTROLLER)
+    radiocam->pad.flags = MEDIA_PAD_FL_SOURCE;
+    sd->entity.function = MEDIA_ENT_F_CAM_SENSOR;
+    ret = media_entity_pads_init(&sd->entity, 1, &radiocam->pad);
+    if (ret < 0)
+    {
+        dev_err(dev, "media entity pads init failed\n");
+        goto err_clean_entity;
+    }
+#endif
+
+    ret = v4l2_device_register(dev, &radiocam->v4l2_dev);
+    if (ret)
+        goto err_v4l2;
+
+    ret = v4l2_device_register_subdev(&radiocam->v4l2_dev, sd);
+    if (ret)
+        goto err_subdev;
+    ret = v4l2_device_register_subdev_nodes(&radiocam->v4l2_dev);
+    if (ret)
+    {
+        dev_err(dev, "Failed to register subdev nodes: %d\n",
+                ret);
+    }
+
+    dev_info(dev, "radiocam subdev registered with devnode\n");
+    if (sd->devnode)
+        dev_info(dev, "subdev devnode name: %s\n", sd->devnode->name);
+    else
+        dev_warn(dev, "subdev devnode not created\n");
     return 0;
+
+err_clean_entity:
+#if defined(CONFIG_MEDIA_CONTROLLER)
+    media_entity_cleanup(&sd->entity);
+#endif
+err_subdev:
+    v4l2_device_unregister_subdev(sd);
+err_v4l2:
+    v4l2_device_unregister(&radiocam->v4l2_dev);
+    return ret;
 }
 
 static void radiocam_remove(struct i2c_client *client)
 {
-    printk("Bye!\n");
+    struct radiocam *radiocam = i2c_get_clientdata(client);
+    struct v4l2_subdev *sd = &radiocam->subdev;
 
-    struct v4l2_subdev *sd = i2c_get_clientdata(client);
-    struct radiocam *radiocam = to_radiocam(sd);
-    v4l2_async_unregister_subdev(sd);
+    v4l2_device_unregister_subdev(sd);
+    v4l2_device_unregister(&radiocam->v4l2_dev);
 #if defined(CONFIG_MEDIA_CONTROLLER)
     media_entity_cleanup(&sd->entity);
 #endif
-    v4l2_ctrl_handler_free(&radiocam->ctrl_handler);
     mutex_destroy(&radiocam->mutex);
+
+    dev_info(&client->dev, "radiocam subdev removed\n");
 }
 
 static struct i2c_driver radiocam_i2c_driver = {
