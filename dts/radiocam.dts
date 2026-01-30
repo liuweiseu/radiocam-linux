@@ -3,14 +3,39 @@
 
 /{
     fragment@0 {
-        target = <&i2c1>;
+        target = <&i2c7>;
         __overlay__ {
             #address-cells = <1>;
             #size-cells = <0>;
             radiocam@28 {
                 compatible = "ucb-ral,radiocam";
                 reg = <0x28>;
+                port {
+                    radiocam_out: endpoint {
+                        remote-endpoint = <&mipi_in_ucam2>;
+                        data-lanes = <1 2>;
+                    };
+                };
             };
+        };
+    };
+
+    fragment@1 {
+        target = <&csi2_dphy0>; 
+        __overlay__ {
+        ports {
+            #address-cells = <1>;
+            #size-cells = <0>;
+            port@0 {
+                #address-cells = <1>;
+                #size-cells = <0>;
+                mipi_in_ucam2: endpoint@2 {
+                    reg = <2>;
+                    remote-endpoint = <&radiocam_out>;
+                    data-lanes = <1 2>;
+                };
+            };
+        };
         };
     };
 };
