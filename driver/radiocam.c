@@ -28,7 +28,7 @@
 #include "radiocam.h"
 
 #define RADIOCAM_NAME "radiocam"
-#define DRIVER_VERSION KERNEL_VERSION(0, 0x00, 0x01)
+#define DRIVER_VERSION KERNEL_VERSION(0, 0x00, 0x02)
 
 #if IS_ENABLED(CONFIG_OF)
 static const struct of_device_id radiocam_of_match[] = {
@@ -41,33 +41,15 @@ MODULE_DEVICE_TABLE(of, radiocam_of_match);
 struct radiocam
 {
     struct i2c_client *client;
-    struct clk *xvclk;
-    struct gpio_desc *power_gpio;
-    struct gpio_desc *reset_gpio;
-    struct gpio_desc *pwdn_gpio;
-    // struct  regulator_bulk_data supplies[OV13850_NUM_SUPPLIES];
-
-    struct pinctrl *pinctrl;
-    struct pinctrl_state *pins_default;
-    struct pinctrl_state *pins_sleep;
-
     struct v4l2_subdev subdev;
     struct media_pad pad;
     struct v4l2_ctrl_handler ctrl_handler;
     struct v4l2_ctrl *exposure;
-    struct v4l2_ctrl *anal_gain;
-    struct v4l2_ctrl *digi_gain;
-    struct v4l2_ctrl *hblank;
-    struct v4l2_ctrl *vblank;
-    struct v4l2_ctrl *test_pattern;
     struct mutex mutex;
     bool streaming;
     bool power_on;
     // const struct ov13850_mode *cur_mode;
     u32 module_index;
-    const char *module_facing;
-    const char *module_name;
-    const char *len_name;
     struct v4l2_device v4l2_dev;
     struct video_device video_dev;
     struct media_device media_dev;
@@ -75,6 +57,9 @@ struct radiocam
 
 #define to_radiocam(sd) container_of(sd, struct radiocam, subdev)
 
+/****************************************************************************************/
+/***************************** low-level register read/write ****************************/
+/****************************************************************************************/
 /* Read register*/
 static int radocam_read_reg(struct i2c_client *client, u8 dev_id, u32 addr, u32 *val)
 {
@@ -164,6 +149,9 @@ static int radiocam_write_reg(struct i2c_client *client, u8 dev_id, u32 addr, u3
     }
 }
 
+/****************************************************************************************/
+/***************************** driver code ****************************/
+/****************************************************************************************/
 /*
  * function: radiocam_runtime_suspend
  * brief: power management
@@ -223,56 +211,6 @@ static long radiocam_ioctl(struct v4l2_subdev *sd, unsigned int cmd, void *arg)
 
     return ret;
 }
-
-// #ifdef CONFIG_COMPAT
-// static long radiocam_compat_ioctl32(struct v4l2_subdev *sd,
-//                                     unsigned int cmd, unsigned long arg)
-// {
-//     void __user *up = compat_ptr(arg);
-//     long ret;
-//     u32 stream = 0;
-
-//     switch (cmd)
-//     {
-//     case RKMODULE_GET_MODULE_INFO:
-//         inf = kzalloc(sizeof(*inf), GFP_KERNEL);
-//         if (!inf)
-//         {
-//             ret = -ENOMEM;
-//             return ret;
-//         }
-
-//         ret = radiocam_ioctl(sd, cmd, inf);
-//         if (!ret)
-//             ret = copy_to_user(up, inf, sizeof(*inf));
-//         kfree(inf);
-//         break;
-//     case RKMODULE_AWB_CFG:
-//         cfg = kzalloc(sizeof(*cfg), GFP_KERNEL);
-//         if (!cfg)
-//         {
-//             ret = -ENOMEM;
-//             return ret;
-//         }
-
-//         ret = copy_from_user(cfg, up, sizeof(*cfg));
-//         if (!ret)
-//             ret = ov13850_ioctl(sd, cmd, cfg);
-//         kfree(cfg);
-//         break;
-//     case RKMODULE_SET_QUICK_STREAM:
-//         ret = copy_from_user(&stream, up, sizeof(u32));
-//         if (!ret)
-//             ret = ov13850_ioctl(sd, cmd, &stream);
-//         break;
-//     default:
-//         ret = -ENOIOCTLCMD;
-//         break;
-//     }
-
-//     return ret;
-// }
-// #endif
 
 static int radiocam_s_stream(struct v4l2_subdev *sd, int on)
 {
@@ -411,6 +349,59 @@ static const struct v4l2_subdev_internal_ops radiocam_internal_ops = {
 };
 #endif
 
+static int radiocam_s_ctrl(struct v4l2_ctrl *ctrl)
+{
+    struct radiocam *radiocam = container_of(ctrl->handler, struct radiocam, ctrl_handler);
+
+    switch (ctrl->id)
+    {
+    case V4L2_CID_RADIOCAM_SETTING:
+        dev_dbg(&radiocam->client->dev, "V4L2_CID_RADIOCAM_SETTING");
+        break;
+    default:
+        return -EINVAL;
+    }
+    return 0;
+}
+
+static const struct v4l2_ctrl_ops radiocam_ctrl_ops = {
+    .s_ctrl = radiocam_s_ctrl,
+};
+
+static const struct v4l2_ctrl_config radiocam_setting_ctrl_config = {
+    .ops = &radiocam_ctrl_ops,
+    .id = V4L2_CID_RADIOCAM_SETTING,
+    .name = "RadioCam Custom Setting",
+    .type = V4L2_CTRL_TYPE_INTEGER,
+    .min = 0,
+    .max = 100,
+    .step = 1,
+    .def = 50,
+};
+
+static int radiocam_initialize_controls(struct radiocam *radiocam)
+{
+    struct v4l2_ctrl_handler *handler;
+    struct v4l2_ctrl *ctrl;
+    int ret;
+    handler = &radiocam->ctrl_handler;
+
+    v4l2_ctrl_handler_init(handler, 2);
+
+    v4l2_ctrl_new_custom(handler, &radiocam_setting_ctrl_config, NULL);
+    if (handler->error)
+    {
+        ret = handler->error;
+        dev_err(&radiocam->client->dev, "Failed to init controls(%d)\n", ret);
+        goto err_free_handler;
+    }
+    radiocam->subdev.ctrl_handler = handler;
+    return 0;
+
+err_free_handler:
+    v4l2_ctrl_handler_free(handler);
+    return ret;
+}
 /*
 *********************** probe and remove functions *************************
 */
@@ -448,6 +439,9 @@ static int radiocam_probe(struct i2c_client *client,
     sd = &radiocam->subdev;
     v4l2_i2c_subdev_init(sd, client, &radiocam_subdev_ops);
     strscpy(sd->name, "radiocam-subdev", sizeof(sd->name));
+    ret = radiocam_initialize_controls(radiocam);
+    if (ret)
+        goto err_destroy_mutex;
 #ifdef CONFIG_VIDEO_V4L2_SUBDEV_API
     sd->internal_ops = &radiocam_internal_ops;
     sd->flags |= V4L2_SUBDEV_FL_HAS_DEVNODE;
@@ -492,6 +486,8 @@ err_clean_entity:
 #if defined(CONFIG_MEDIA_CONTROLLER)
     media_entity_cleanup(&sd->entity);
 #endif
+err_destroy_mutex:
+    mutex_destroy(&radiocam->mutex);
     return ret;
 }
 
