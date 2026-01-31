@@ -28,7 +28,7 @@
 #include "radiocam.h"
 
 #define RADIOCAM_NAME "radiocam"
-#define DRIVER_VERSION KERNEL_VERSION(0, 0x00, 0x02)
+#define DRIVER_VERSION KERNEL_VERSION(0, 0x00, 0x03)
 
 #if IS_ENABLED(CONFIG_OF)
 static const struct of_device_id radiocam_of_match[] = {
@@ -37,6 +37,16 @@ static const struct of_device_id radiocam_of_match[] = {
 };
 MODULE_DEVICE_TABLE(of, radiocam_of_match);
 #endif
+
+struct radiocam_mode
+{
+    u32 width;
+    u32 height;
+    struct v4l2_fract max_fps;
+    u32 hts_def;
+    u32 vts_def;
+    u32 exp_def;
+};
 
 struct radiocam
 {
@@ -48,7 +58,7 @@ struct radiocam
     struct mutex mutex;
     bool streaming;
     bool power_on;
-    // const struct ov13850_mode *cur_mode;
+    const struct radiocam_mode *cur_mode;
     u32 module_index;
     struct v4l2_device v4l2_dev;
     struct video_device video_dev;
@@ -56,6 +66,33 @@ struct radiocam
 };
 
 #define to_radiocam(sd) container_of(sd, struct radiocam, subdev)
+
+static const struct radiocam_mode supported_modes[] = {
+    {
+        .width = 2112,
+        .height = 1568,
+        .max_fps = {
+            .numerator = 10000,
+            .denominator = 300000,
+        },
+        .exp_def = 0x0600,
+        .hts_def = 0x12c0,
+        .vts_def = 0x0680,
+        //.reg_list = ov13850_2112x1568_regs,
+    },
+    {
+        .width = 4224,
+        .height = 3136,
+        .max_fps = {
+            .numerator = 20000,
+            .denominator = 150000,
+        },
+        .exp_def = 0x0600,
+        .hts_def = 0x12c0,
+        .vts_def = 0x0d00,
+        //.reg_list = ov13850_4224x3136_regs,
+    },
+};
 
 /****************************************************************************************/
 /***************************** low-level register read/write ****************************/
@@ -325,14 +362,14 @@ static int radiocam_open(struct v4l2_subdev *sd, struct v4l2_subdev_fh *fh)
     struct radiocam *radiocam = to_radiocam(sd);
     struct v4l2_mbus_framefmt *try_fmt =
         v4l2_subdev_get_try_format(sd, fh->state, 0);
-    // const struct ov13850_mode *def_mode = &supported_modes[0];
+    const struct radiocam_mode *def_mode = &supported_modes[0];
 
     mutex_lock(&radiocam->mutex);
     /* Initialize try_fmt */
-    // try_fmt->width = def_mode->width;
-    // try_fmt->height = def_mode->height;
-    try_fmt->width = 0;
-    try_fmt->height = 0;
+    try_fmt->width = def_mode->width;
+    try_fmt->height = def_mode->height;
+    // try_fmt->width = 0;
+    // try_fmt->height = 0;
     try_fmt->code = MEDIA_BUS_FMT_SBGGR10_1X10;
     try_fmt->field = V4L2_FIELD_NONE;
 
@@ -419,6 +456,7 @@ static int radiocam_probe(struct i2c_client *client,
                           const struct i2c_device_id *id)
 {
     struct device *dev = &client->dev;
+    struct device_node *node = dev->of_node;
     struct radiocam *radiocam;
     struct v4l2_subdev *sd;
     int ret;
@@ -432,6 +470,12 @@ static int radiocam_probe(struct i2c_client *client,
     if (!radiocam)
         return -ENOMEM;
 
+    ret = of_property_read_u32(node, "rockchip,camera-module-index", &radiocam->module_index);
+    if (ret)
+    {
+        dev_err(dev, "could not get module information!\n");
+        return -EINVAL;
+    }
     // save i2c client to radiocam struct
     radiocam->client = client;
     mutex_init(&radiocam->mutex);
@@ -457,35 +501,21 @@ static int radiocam_probe(struct i2c_client *client,
         goto err_clean_entity;
     }
 #endif
-
-    ret = v4l2_device_register(dev, &radiocam->v4l2_dev);
-    if (ret)
-        goto err_v4l2;
-
-    ret = v4l2_device_register_subdev(&radiocam->v4l2_dev, sd);
-    if (ret)
-        goto err_subdev;
-    ret = v4l2_device_register_subdev_nodes(&radiocam->v4l2_dev);
+    ret = v4l2_async_register_subdev_sensor(sd);
     if (ret)
     {
-        dev_err(dev, "Failed to register subdev nodes: %d\n", ret);
+        dev_err(dev, "v4l2 async register subdev failed\n");
+        goto err_clean_entity;
     }
-
     dev_info(dev, "radiocam subdev registered with devnode\n");
-    if (sd->devnode)
-        dev_info(dev, "subdev devnode name: %s\n", sd->devnode->name);
-    else
-        dev_warn(dev, "subdev devnode not created\n");
     return 0;
 
-err_subdev:
-    v4l2_device_unregister_subdev(sd);
-err_v4l2:
-    v4l2_device_unregister(&radiocam->v4l2_dev);
 err_clean_entity:
 #if defined(CONFIG_MEDIA_CONTROLLER)
     media_entity_cleanup(&sd->entity);
 #endif
+err_free_handler:
+    v4l2_ctrl_handler_free(&radiocam->ctrl_handler);
 err_destroy_mutex:
     mutex_destroy(&radiocam->mutex);
     return ret;
@@ -496,11 +526,11 @@ static void radiocam_remove(struct i2c_client *client)
     struct v4l2_subdev *sd = i2c_get_clientdata(client);
     struct radiocam *radiocam = to_radiocam(sd);
 
-    v4l2_device_unregister_subdev(sd);
-    v4l2_device_unregister(&radiocam->v4l2_dev);
+    v4l2_async_unregister_subdev(sd);
 #if defined(CONFIG_MEDIA_CONTROLLER)
     media_entity_cleanup(&sd->entity);
 #endif
+    v4l2_ctrl_handler_free(&radiocam->ctrl_handler);
     mutex_destroy(&radiocam->mutex);
 
     dev_info(&client->dev, "radiocam subdev removed\n");
