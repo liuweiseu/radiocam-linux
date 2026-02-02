@@ -303,9 +303,25 @@ static int radiocam_get_fmt(struct v4l2_subdev *sd,
                             struct v4l2_subdev_format *fmt)
 {
     struct radiocam *radiocam = to_radiocam(sd);
+    const struct radiocam_mode *mode = radiocam->cur_mode;
 
     mutex_lock(&radiocam->mutex);
-    // TODO: to be implemented
+    if (fmt->which == V4L2_SUBDEV_FORMAT_TRY)
+    {
+#ifdef CONFIG_VIDEO_V4L2_SUBDEV_API
+        fmt->format = *v4l2_subdev_get_try_format(sd, sd_state, fmt->pad);
+#else
+        mutex_unlock(&radiocam->mutex);
+        return -ENOTTY;
+#endif
+    }
+    else
+    {
+        fmt->format.width = mode->width;
+        fmt->format.height = mode->height;
+        fmt->format.code = MEDIA_BUS_FMT_SBGGR10_1X10;
+        fmt->format.field = V4L2_FIELD_NONE;
+    }
     mutex_unlock(&radiocam->mutex);
 
     return 0;
@@ -364,10 +380,10 @@ static int radiocam_set_fmt(struct v4l2_subdev *sd,
         return -ENOTTY;
 #endif
     }
-    /*else
+    else
     {
-        // Nothing to do here
-    }*/
+        dev_dbg(sd->dev, "Do nothing in set fmt.");
+    }
     dev_info(&radiocam->client->dev, "%s: mode->link_freq_idx(%d)",
              __func__, mode->link_freq_idx);
     mutex_unlock(&radiocam->mutex);
@@ -527,6 +543,9 @@ static int radiocam_probe(struct i2c_client *client,
 
     // save i2c client to radiocam struct
     radiocam->client = client;
+
+    radiocam->cur_mode = &supported_modes[0];
+
     mutex_init(&radiocam->mutex);
 
     sd = &radiocam->subdev;
