@@ -10,7 +10,6 @@
             radiocam@28 {
                 status = "okay";
                 compatible = "ucb-ral,radiocam";
-                rockchip,camera-module-index = <0>;
                 reg = <0x28>;
                 port {
                     radiocam_out: endpoint {

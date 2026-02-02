@@ -30,6 +30,7 @@
 #define RADIOCAM_NAME "radiocam"
 #define DRIVER_VERSION KERNEL_VERSION(0, 0x00, 0x03)
 
+#define RADIOCAM_LANES 4
 #if IS_ENABLED(CONFIG_OF)
 static const struct of_device_id radiocam_of_match[] = {
     {.compatible = "ucb-ral,radiocam"},
@@ -46,8 +47,9 @@ struct radiocam_mode
     u32 hts_def;
     u32 vts_def;
     u32 exp_def;
+    u32 link_freq_idx;
+    u32 bpp;
 };
-
 struct radiocam
 {
     struct i2c_client *client;
@@ -309,13 +311,65 @@ static int radiocam_get_fmt(struct v4l2_subdev *sd,
     return 0;
 }
 
+static int radiocam_get_reso_dist(const struct radiocam_mode *mode,
+                                  struct v4l2_mbus_framefmt *framefmt)
+{
+    return abs(mode->width - framefmt->width) +
+           abs(mode->height - framefmt->height);
+}
+
+static const struct radiocam_mode *
+radiocam_find_best_fit(struct v4l2_subdev_format *fmt)
+{
+    struct v4l2_mbus_framefmt *framefmt = &fmt->format;
+    int dist;
+    int cur_best_fit = 0;
+    int cur_best_fit_dist = -1;
+    unsigned int i;
+
+    for (i = 0; i < ARRAY_SIZE(supported_modes); i++)
+    {
+        dist = radiocam_get_reso_dist(&supported_modes[i], framefmt);
+        if (cur_best_fit_dist == -1 || dist < cur_best_fit_dist)
+        {
+            cur_best_fit_dist = dist;
+            cur_best_fit = i;
+        }
+    }
+
+    return &supported_modes[cur_best_fit];
+}
+
 static int radiocam_set_fmt(struct v4l2_subdev *sd,
                             struct v4l2_subdev_state *sd_state,
                             struct v4l2_subdev_format *fmt)
 {
     struct radiocam *radiocam = to_radiocam(sd);
+    const struct radiocam_mode *mode;
+    // s64 h_blank, vblank_def;
+    // u64 pixel_rate = 0;
+    u32 lane_num = RADIOCAM_LANES;
     mutex_lock(&radiocam->mutex);
-    // TODO: to be implemented
+    mode = radiocam_find_best_fit(fmt);
+    fmt->format.code = MEDIA_BUS_FMT_SBGGR10_1X10;
+    fmt->format.width = mode->width;
+    fmt->format.height = mode->height;
+    fmt->format.field = V4L2_FIELD_NONE;
+    if (fmt->which == V4L2_SUBDEV_FORMAT_TRY)
+    {
+#ifdef CONFIG_VIDEO_V4L2_SUBDEV_API
+        *v4l2_subdev_get_try_format(sd, sd_state, fmt->pad) = fmt->format;
+#else
+        mutex_unlock(&radiocam->mutex);
+        return -ENOTTY;
+#endif
+    }
+    /*else
+    {
+        // Nothing to do here
+    }*/
+    dev_info(&radiocam->client->dev, "%s: mode->link_freq_idx(%d)",
+             __func__, mode->link_freq_idx);
     mutex_unlock(&radiocam->mutex);
 
     return 0;
@@ -324,7 +378,8 @@ static int radiocam_set_fmt(struct v4l2_subdev *sd,
 static int radiocam_g_mbus_config(struct v4l2_subdev *sd, unsigned int pad_id,
                                   struct v4l2_mbus_config *config)
 {
-    // TODO: to be implemented
+    config->type = V4L2_MBUS_CSI2_DPHY;
+    config->bus.mipi_csi2.num_data_lanes = 4;
     return 0;
 }
 
@@ -470,12 +525,6 @@ static int radiocam_probe(struct i2c_client *client,
     if (!radiocam)
         return -ENOMEM;
 
-    ret = of_property_read_u32(node, "rockchip,camera-module-index", &radiocam->module_index);
-    if (ret)
-    {
-        dev_err(dev, "could not get module information!\n");
-        return -EINVAL;
-    }
     // save i2c client to radiocam struct
     radiocam->client = client;
     mutex_init(&radiocam->mutex);
@@ -539,7 +588,7 @@ static void radiocam_remove(struct i2c_client *client)
 static struct i2c_driver radiocam_i2c_driver = {
     .driver = {
         .name = RADIOCAM_NAME,
-        .pm = &radiocam_pm_ops,
+        //.pm = &radiocam_pm_ops,
         .of_match_table = of_match_ptr(radiocam_of_match),
     },
     .probe = &radiocam_probe,
