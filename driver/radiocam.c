@@ -319,7 +319,7 @@ static int radiocam_get_fmt(struct v4l2_subdev *sd,
     {
         fmt->format.width = mode->width;
         fmt->format.height = mode->height;
-        fmt->format.code = MEDIA_BUS_FMT_SBGGR10_1X10;
+        fmt->format.code = MEDIA_BUS_FMT_SBGGR8_1X8;
         fmt->format.field = V4L2_FIELD_NONE;
     }
     mutex_unlock(&radiocam->mutex);
@@ -367,7 +367,7 @@ static int radiocam_set_fmt(struct v4l2_subdev *sd,
     u32 lane_num = RADIOCAM_LANES;
     mutex_lock(&radiocam->mutex);
     mode = radiocam_find_best_fit(fmt);
-    fmt->format.code = MEDIA_BUS_FMT_SBGGR10_1X10;
+    fmt->format.code = MEDIA_BUS_FMT_SBGGR8_1X8;
     fmt->format.width = mode->width;
     fmt->format.height = mode->height;
     fmt->format.field = V4L2_FIELD_NONE;
@@ -441,7 +441,7 @@ static int radiocam_open(struct v4l2_subdev *sd, struct v4l2_subdev_fh *fh)
     try_fmt->height = def_mode->height;
     // try_fmt->width = 0;
     // try_fmt->height = 0;
-    try_fmt->code = MEDIA_BUS_FMT_SBGGR10_1X10;
+    try_fmt->code = MEDIA_BUS_FMT_SBGGR8_1X8;
     try_fmt->field = V4L2_FIELD_NONE;
 
     mutex_unlock(&radiocam->mutex);
