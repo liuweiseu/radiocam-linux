@@ -30,6 +30,10 @@
 #define RADIOCAM_NAME "radiocam"
 #define DRIVER_VERSION KERNEL_VERSION(0, 0x00, 0x03)
 
+#define RADIOCAM_LINK_FREQ_320MHZ 320000000
+/* pixel rate = link frequency * 2 * lanes / BITS_PER_SAMPLE */
+#define ORADIOCAM_PIXEL_RATE (RADIOCAM_LINK_FREQ_320MHZ * 2 * 4 / 8)
+
 #define RADIOCAM_LANES 4
 #if IS_ENABLED(CONFIG_OF)
 static const struct of_device_id radiocam_of_match[] = {
@@ -71,28 +75,17 @@ struct radiocam
 
 static const struct radiocam_mode supported_modes[] = {
     {
-        .width = 4224,
-        .height = 3136,
-        .max_fps = {
-            .numerator = 20000,
-            .denominator = 150000,
-        },
-        .exp_def = 0x0600,
-        .hts_def = 0x12c0,
-        .vts_def = 0x0d00,
-        //.reg_list = ov13850_4224x3136_regs,
-    },
-    {
-        .width = 2112,
-        .height = 1568,
+        .width = 1920,
+        .height = 1080,
         .max_fps = {
             .numerator = 10000,
-            .denominator = 300000,
+            .denominator = 300000, /* 30 fps */
         },
-        .exp_def = 0x0600,
-        .hts_def = 0x12c0,
-        .vts_def = 0x0680,
-        //.reg_list = ov13850_2112x1568_regs,
+        .exp_def = 0x0440,
+        .hts_def = 2200, /* TODO: confirm with camera hardware spec */
+        .vts_def = 1125, /* TODO: confirm with camera hardware spec */
+        .link_freq_idx = 0,
+        .bpp = 8,
     },
 };
 
@@ -188,9 +181,9 @@ static int radiocam_write_reg(struct i2c_client *client, u8 dev_id, u32 addr, u3
     }
 }
 
-/****************************************************************************************/
+/**********************************************************************/
 /***************************** driver code ****************************/
-/****************************************************************************************/
+/**********************************************************************/
 /*
  * function: radiocam_runtime_suspend
  * brief: power management
@@ -251,6 +244,22 @@ static long radiocam_ioctl(struct v4l2_subdev *sd, unsigned int cmd, void *arg)
     return ret;
 }
 
+static int __radiocam_start_stream(struct radiocam *radiocam)
+{
+    // TODO: use i2c read/write reg here
+    u32 val;
+    return radocam_read_reg(radiocam->client, 0x02, 0x00, &val);
+}
+
+static int __radiocam_stop_stream(struct radiocam *radiocam)
+{
+    // TODO: use i2c read/write reg here
+    return radocam_write_reg(radiocam->client,
+                             0x02,
+                             0x00,
+                             0x00);
+}
+
 static int radiocam_s_stream(struct v4l2_subdev *sd, int on)
 {
     struct radiocam *radiocam = to_radiocam(sd);
@@ -258,7 +267,24 @@ static int radiocam_s_stream(struct v4l2_subdev *sd, int on)
     int ret = 0;
 
     mutex_lock(&radiocam->mutex);
-    // TODO: to be implemented
+    on = !!on;
+    if (on == radiocam->streaming)
+        goto unlock_and_return;
+    if (on)
+    {
+        ret = __radiocam_start_stream(radiocam);
+        if (ret)
+        {
+            v4l2_err(sd, "start stream failed while write regs\n");
+            pm_runtime_put(&client->dev);
+            goto unlock_and_return;
+        }
+    }
+    else
+    {
+        __radiocam_stop_stream(radiocam);
+    }
+    radiocam->streaming = on;
 unlock_and_return:
     mutex_unlock(&radiocam->mutex);
 
@@ -269,7 +295,11 @@ static int radiocam_g_frame_interval(struct v4l2_subdev *sd,
                                      struct v4l2_subdev_frame_interval *fi)
 {
     struct radiocam *radiocam = to_radiocam(sd);
-    // TODO: to be implemented
+
+    mutex_lock(&radiocam->mutex);
+    fi->interval = radiocam->cur_mode->max_fps;
+    mutex_unlock(&radiocam->mutex);
+
     return 0;
 }
 
@@ -277,8 +307,10 @@ static int radiocam_enum_mbus_code(struct v4l2_subdev *sd,
                                    struct v4l2_subdev_state *sd_state,
                                    struct v4l2_subdev_mbus_code_enum *code)
 {
-    // TODO: to be implemented
+    if (code->index != 0)
+        return -EINVAL;
 
+    code->code = MEDIA_BUS_FMT_SBGGR8_1X8;
     return 0;
 }
 
@@ -286,7 +318,17 @@ static int radiocam_enum_frame_sizes(struct v4l2_subdev *sd,
                                      struct v4l2_subdev_state *sd_state,
                                      struct v4l2_subdev_frame_size_enum *fse)
 {
-    // TODO: to be implemented
+    if (fse->index >= ARRAY_SIZE(supported_modes))
+        return -EINVAL;
+
+    if (fse->code != MEDIA_BUS_FMT_SBGGR8_1X8)
+        return -EINVAL;
+
+    fse->min_width = supported_modes[fse->index].width;
+    fse->max_width = supported_modes[fse->index].width;
+    fse->min_height = supported_modes[fse->index].height;
+    fse->max_height = supported_modes[fse->index].height;
+
     return 0;
 }
 
@@ -294,7 +336,30 @@ static int radiocam_enum_frame_interval(struct v4l2_subdev *sd,
                                         struct v4l2_subdev_state *sd_state,
                                         struct v4l2_subdev_frame_interval_enum *fie)
 {
-    // TODO: to be implemented
+    const struct radiocam_mode *mode = NULL;
+    unsigned int i;
+
+    if (fie->code != MEDIA_BUS_FMT_SBGGR8_1X8)
+        return -EINVAL;
+
+    /* find the mode matching the requested resolution */
+    for (i = 0; i < ARRAY_SIZE(supported_modes); i++)
+    {
+        if (supported_modes[i].width == fie->width &&
+            supported_modes[i].height == fie->height)
+        {
+            mode = &supported_modes[i];
+            break;
+        }
+    }
+    if (!mode)
+        return -EINVAL;
+
+    /* each mode has exactly one fixed frame rate, so only index 0 is valid */
+    if (fie->index != 0)
+        return -EINVAL;
+
+    fie->interval = mode->max_fps;
     return 0;
 }
 
@@ -494,8 +559,11 @@ static int radiocam_initialize_controls(struct radiocam *radiocam)
     int ret;
     handler = &radiocam->ctrl_handler;
 
-    v4l2_ctrl_handler_init(handler, 2);
+    ret = v4l2_ctrl_handler_init(handler, 4);
+    if (ret)
+        return ret;
 
+    /* define a customized control handler */
     v4l2_ctrl_new_custom(handler, &radiocam_setting_ctrl_config, NULL);
     if (handler->error)
     {
