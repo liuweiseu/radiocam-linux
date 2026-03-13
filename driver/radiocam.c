@@ -97,7 +97,7 @@ static const struct radiocam_mode supported_modes[] = {
 /***************************** low-level register read/write ****************************/
 /****************************************************************************************/
 /* Read register*/
-static int radocam_read_reg(struct i2c_client *client, u8 dev_id, u32 addr, u32 *val)
+static int radiocam_read_reg(struct i2c_client *client, u8 dev_id, u32 addr, u32 *val)
 {
     struct i2c_msg msgs[1];
     int ret;
@@ -252,16 +252,16 @@ static int __radiocam_start_stream(struct radiocam *radiocam)
 {
     // TODO: use i2c read/write reg here
     u32 val;
-    return radocam_read_reg(radiocam->client, 0x02, 0x00, &val);
+    return radiocam_read_reg(radiocam->client, 0x02, 0x00, &val);
 }
 
 static int __radiocam_stop_stream(struct radiocam *radiocam)
 {
     // TODO: use i2c read/write reg here
-    return radocam_write_reg(radiocam->client,
-                             0x02,
-                             0x00,
-                             0x00);
+    return radiocam_write_reg(radiocam->client,
+                              0x02,
+                              0x00,
+                              0x00);
 }
 
 static int radiocam_s_stream(struct v4l2_subdev *sd, int on)
