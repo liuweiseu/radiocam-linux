@@ -35,6 +35,10 @@
 #define ORADIOCAM_PIXEL_RATE (RADIOCAM_LINK_FREQ_320MHZ * 2 * 4 / 8)
 
 #define RADIOCAM_LANES 4
+
+static const s64 link_freq_menu_items[] = {
+    RADIOCAM_LINK_FREQ_320MHZ,
+};
 #if IS_ENABLED(CONFIG_OF)
 static const struct of_device_id radiocam_of_match[] = {
     {.compatible = "ucb-ral,radiocam"},
@@ -557,14 +561,24 @@ static int radiocam_initialize_controls(struct radiocam *radiocam)
     struct v4l2_ctrl_handler *handler;
     struct v4l2_ctrl *ctrl;
     int ret;
-    handler = &radiocam->ctrl_handler;
 
+    handler = &radiocam->ctrl_handler;
     ret = v4l2_ctrl_handler_init(handler, 4);
     if (ret)
         return ret;
 
-    /* define a customized control handler */
+    /* link frequency — read-only, fixed at 320MHz to match hardware */
+    ctrl = v4l2_ctrl_new_int_menu(handler, NULL,
+                                  V4L2_CID_LINK_FREQ,
+                                  ARRAY_SIZE(link_freq_menu_items) - 1,
+                                  0,
+                                  link_freq_menu_items);
+    if (ctrl)
+        ctrl->flags |= V4L2_CTRL_FLAG_READ_ONLY;
+
+    /* customized control */
     v4l2_ctrl_new_custom(handler, &radiocam_setting_ctrl_config, NULL);
+
     if (handler->error)
     {
         ret = handler->error;
