@@ -14,7 +14,7 @@
                 port {
                     radiocam_out: endpoint {
                         remote-endpoint = <&mipi_in_ucam2>;
-                        data-lanes = <1 2>;
+                        data-lanes = <1 2 3 4>;
                     };
                 };
             };
@@ -33,7 +33,7 @@
                 mipi_in_ucam2: endpoint@2 {
                     reg = <2>;
                     remote-endpoint = <&radiocam_out>;
-                    data-lanes = <1 2>;
+                    data-lanes = <1 2 3 4>;
                 };
             };
         };
