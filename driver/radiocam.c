@@ -343,8 +343,21 @@ static int radiocam_enum_frame_interval(struct v4l2_subdev *sd,
     const struct radiocam_mode *mode = NULL;
     unsigned int i;
 
-    if (fie->code != MEDIA_BUS_FMT_SBGGR8_1X8)
+    if (fie->code != 0 && fie->code != MEDIA_BUS_FMT_SBGGR8_1X8)
         return -EINVAL;
+
+    /* rkcif calls with code=0 and width=0/height=0 to enumerate all modes;
+     * in that case enumerate by index across all supported modes */
+    if (fie->code == 0 || (fie->width == 0 && fie->height == 0)) {
+        if (fie->index >= ARRAY_SIZE(supported_modes))
+            return -EINVAL;
+        mode = &supported_modes[fie->index];
+        fie->code = MEDIA_BUS_FMT_SBGGR8_1X8;
+        fie->width = mode->width;
+        fie->height = mode->height;
+        fie->interval = mode->max_fps;
+        return 0;
+    }
 
     /* find the mode matching the requested resolution */
     for (i = 0; i < ARRAY_SIZE(supported_modes); i++)
