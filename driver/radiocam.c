@@ -30,14 +30,14 @@
 #define RADIOCAM_NAME "radiocam"
 #define DRIVER_VERSION KERNEL_VERSION(0, 0x00, 0x03)
 
-#define RADIOCAM_LINK_FREQ_320MHZ 320000000
-/* pixel rate = link frequency * 2 * lanes / BITS_PER_SAMPLE */
-#define ORADIOCAM_PIXEL_RATE (RADIOCAM_LINK_FREQ_320MHZ * 2 * 4 / 8)
+#define RADIOCAM_LINK_FREQ_160MHZ 160000000
+/* actual pixel rate provided by hardware: 75 MHz */
+#define RADIOCAM_PIXEL_RATE 20000000ULL
 
 #define RADIOCAM_LANES 4
 
 static const s64 link_freq_menu_items[] = {
-    RADIOCAM_LINK_FREQ_320MHZ,
+    RADIOCAM_LINK_FREQ_160MHZ,
 };
 #if IS_ENABLED(CONFIG_OF)
 static const struct of_device_id radiocam_of_match[] = {
@@ -82,14 +82,16 @@ static const struct radiocam_mode supported_modes[] = {
         .width = 1920,
         .height = 1080,
         .max_fps = {
-            .numerator = 10000,
-            .denominator = 300000, /* 30 fps */
+            .numerator = 99, //33,
+            .denominator = 400, //500, /* 500/33 ≈ 30.3/2 fps
+                                 // * = pixel_rate / (HTS * VTS)
+                                 // * = 75,000,000 / (2200 * 1125) */
         },
         .exp_def = 0x0440,
-        .hts_def = 2200, /* TODO: confirm with camera hardware spec */
-        .vts_def = 1125, /* TODO: confirm with camera hardware spec */
+        .hts_def = 2200, /* HS(44) + HBP(148) + HDISP(1920) + HFP(88) */
+        .vts_def = 1125, /* VS(5) + VBP(36) + VDISP(1080) + VFP(4) */
         .link_freq_idx = 0,
-        .bpp = 8,
+        .bpp = 16,
     },
 };
 
@@ -314,7 +316,7 @@ static int radiocam_enum_mbus_code(struct v4l2_subdev *sd,
     if (code->index != 0)
         return -EINVAL;
 
-    code->code = MEDIA_BUS_FMT_SBGGR8_1X8;
+    code->code = MEDIA_BUS_FMT_SBGGR16_1X16;
     return 0;
 }
 
@@ -325,7 +327,7 @@ static int radiocam_enum_frame_sizes(struct v4l2_subdev *sd,
     if (fse->index >= ARRAY_SIZE(supported_modes))
         return -EINVAL;
 
-    if (fse->code != MEDIA_BUS_FMT_SBGGR8_1X8)
+    if (fse->code != MEDIA_BUS_FMT_SBGGR16_1X16)
         return -EINVAL;
 
     fse->min_width = supported_modes[fse->index].width;
@@ -343,16 +345,17 @@ static int radiocam_enum_frame_interval(struct v4l2_subdev *sd,
     const struct radiocam_mode *mode = NULL;
     unsigned int i;
 
-    if (fie->code != 0 && fie->code != MEDIA_BUS_FMT_SBGGR8_1X8)
+    if (fie->code != 0 && fie->code != MEDIA_BUS_FMT_SBGGR16_1X16)
         return -EINVAL;
 
     /* rkcif calls with code=0 and width=0/height=0 to enumerate all modes;
      * in that case enumerate by index across all supported modes */
-    if (fie->code == 0 || (fie->width == 0 && fie->height == 0)) {
+    if (fie->code == 0 || (fie->width == 0 && fie->height == 0))
+    {
         if (fie->index >= ARRAY_SIZE(supported_modes))
             return -EINVAL;
         mode = &supported_modes[fie->index];
-        fie->code = MEDIA_BUS_FMT_SBGGR8_1X8;
+        fie->code = MEDIA_BUS_FMT_SBGGR16_1X16;
         fie->width = mode->width;
         fie->height = mode->height;
         fie->interval = mode->max_fps;
@@ -401,7 +404,7 @@ static int radiocam_get_fmt(struct v4l2_subdev *sd,
     {
         fmt->format.width = mode->width;
         fmt->format.height = mode->height;
-        fmt->format.code = MEDIA_BUS_FMT_SBGGR8_1X8;
+        fmt->format.code = MEDIA_BUS_FMT_SBGGR16_1X16;
         fmt->format.field = V4L2_FIELD_NONE;
     }
     mutex_unlock(&radiocam->mutex);
@@ -449,7 +452,7 @@ static int radiocam_set_fmt(struct v4l2_subdev *sd,
     u32 lane_num = RADIOCAM_LANES;
     mutex_lock(&radiocam->mutex);
     mode = radiocam_find_best_fit(fmt);
-    fmt->format.code = MEDIA_BUS_FMT_SBGGR8_1X8;
+    fmt->format.code = MEDIA_BUS_FMT_SBGGR16_1X16;
     fmt->format.width = mode->width;
     fmt->format.height = mode->height;
     fmt->format.field = V4L2_FIELD_NONE;
@@ -523,7 +526,7 @@ static int radiocam_open(struct v4l2_subdev *sd, struct v4l2_subdev_fh *fh)
     try_fmt->height = def_mode->height;
     // try_fmt->width = 0;
     // try_fmt->height = 0;
-    try_fmt->code = MEDIA_BUS_FMT_SBGGR8_1X8;
+    try_fmt->code = MEDIA_BUS_FMT_SBGGR16_1X16;
     try_fmt->field = V4L2_FIELD_NONE;
 
     mutex_unlock(&radiocam->mutex);
@@ -576,9 +579,14 @@ static int radiocam_initialize_controls(struct radiocam *radiocam)
     int ret;
 
     handler = &radiocam->ctrl_handler;
-    ret = v4l2_ctrl_handler_init(handler, 4);
+    ret = v4l2_ctrl_handler_init(handler, 3);
     if (ret)
         return ret;
+
+    /* pixel rate — read-only, 75 MHz as provided by hardware */
+    v4l2_ctrl_new_std(handler, NULL,
+                      V4L2_CID_PIXEL_RATE,
+                      0, RADIOCAM_PIXEL_RATE, 1, RADIOCAM_PIXEL_RATE);
 
     /* link frequency — read-only, fixed at 320MHz to match hardware */
     ctrl = v4l2_ctrl_new_int_menu(handler, NULL,
