@@ -1,4 +1,4 @@
-#include "camera.h"
+#include "sdr.h"
 
 #include <fcntl.h>
 #include <stdio.h>
@@ -11,7 +11,7 @@
 #define VIDEO_DEVICE   "/dev/video0"
 #define SENSOR_DEVICE  "/dev/v4l-subdev2"
 
-#define CAM_WIDTH  4224
+#define CAM_WIDTH  4224 //might need updating depending on data size, maybe should be dynamic?
 #define CAM_HEIGHT 3136
 
 #define BUFFER_COUNT 3
@@ -23,7 +23,7 @@ static size_t buf_size;
 static enum v4l2_buf_type type;
 
 
-int camera_init() {
+int data_transfer_init() {
 
     int sensor_fd = open(SENSOR_DEVICE, O_RDWR);
     int fd = open(VIDEO_DEVICE, O_RDWR);
@@ -80,7 +80,7 @@ int camera_init() {
 }
 
 
-int camera_close() {
+int data_transfer_close() {
 
     close(sensor_fd);
 
@@ -95,7 +95,7 @@ int camera_close() {
 }
 
 
-int capture_frame(const char *filename) {
+int read_data(const char *filename) {
 
     struct v4l2_buffer buf;
     struct v4l2_plane plane;
@@ -121,10 +121,10 @@ int capture_frame(const char *filename) {
 }
 
 
-int camera_set_control(uint32_t id, int value) {
+int sdr_set_control(uint32_t id, int value) {
 
 /*
- * id accepted values: V4L2_CID_VBLANK, V4L2_CID_EXPOSURE, V4L2_CID_ANALOGUE_GAIN, V4L2_CID_TEST_PATTERN
+ * id accepted values: V4L2_CID_TEST_PATTERN, (tbd)
  */
 
     if (sensor_fd < 0)
@@ -146,51 +146,28 @@ int camera_set_control(uint32_t id, int value) {
 }
 
 
-int camera_set_vblank(int value) {
-
-/*
- * Default value: 78
- * Range: 78 - 29631
- * Notes: OV13855 Driver requires vblank > 1000
- */
-
-    return camera_set_control(V4L2_CID_VBLANK, value);
-
+int sdr_set_adc_config(int value) {
+    //not implemented
+    return 0;
 }
 
 
-int camera_set_exposure(int value) {
+int sdr_set_mipi_config(int value) {
+    //not implemented
+    return 0;
+}
 
-/*
- * Default value: 2048
- * Range: 4 - 3210
- */
-
-    return camera_set_control(V4L2_CID_EXPOSURE, value);
-
+int sdr_set_synthesizer_config(int value) {
+    //not implemented
+    return 0;
 }
 
 
-int camera_set_gain(int value) {
-
-/*
- * Default value: 128
- * Range: 128 - 1984
- */
-
-    return camera_set_control(V4L2_CID_ANALOGUE_GAIN, value);
-
-}
-
-
-int camera_set_test_pattern(int mode) {
-
+int sdr_set_test_pattern(int mode) {
 /*
  * Default value: 0
  * Range: 0 - 4
  */
-
-    return camera_set_control(V4L2_CID_TEST_PATTERN, mode);
-
+    return sdr_set_control(V4L2_CID_TEST_PATTERN, mode);
 }
 
