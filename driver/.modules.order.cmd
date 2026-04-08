@@ -1,1 +1,0 @@
-cmd_/home/wei/Projects/opi5/radiocam-linux/driver/modules.order := {   echo /home/wei/Projects/opi5/radiocam-linux/driver/radiocam.ko; :; } > /home/wei/Projects/opi5/radiocam-linux/driver/modules.order

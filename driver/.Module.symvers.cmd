@@ -1,1 +1,0 @@
-cmd_/home/wei/Projects/opi5/radiocam-linux/driver/Module.symvers :=  sed 's/ko$$/o/'  /home/wei/Projects/opi5/radiocam-linux/driver/modules.order | scripts/mod/modpost       -o /home/wei/Projects/opi5/radiocam-linux/driver/Module.symvers -e -i Module.symvers -T - 

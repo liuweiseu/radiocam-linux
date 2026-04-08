@@ -30,9 +30,9 @@
 #define RADIOCAM_NAME "radiocam"
 #define DRIVER_VERSION KERNEL_VERSION(0, 0x00, 0x03)
 
-#define RADIOCAM_LINK_FREQ_160MHZ 160000000
+#define RADIOCAM_LINK_FREQ_160MHZ 40000000
 /* actual pixel rate provided by hardware: 75 MHz */
-#define RADIOCAM_PIXEL_RATE 20000000ULL
+#define RADIOCAM_PIXEL_RATE 10000000ULL
 
 #define RADIOCAM_LANES 4
 
@@ -82,16 +82,17 @@ static const struct radiocam_mode supported_modes[] = {
         .width = 1920,
         .height = 1080,
         .max_fps = {
-            .numerator = 99, //33,
-            .denominator = 400, //500, /* 500/33 ≈ 30.3/2 fps
+            .numerator = 162, //33,
+            .denominator = 3125, //500, /* 500/33 ≈ 30.3/2 fps
                                  // * = pixel_rate / (HTS * VTS)
                                  // * = 75,000,000 / (2200 * 1125) */
         },
         .exp_def = 0x0440,
-        .hts_def = 2200, /* HS(44) + HBP(148) + HDISP(1920) + HFP(88) */
-        .vts_def = 1125, /* VS(5) + VBP(36) + VDISP(1080) + VFP(4) */
+        //.hts_def = 4800,
+        .hts_def = 3840, /* HS(44) + HBP(148) + HDISP(1920) + HFP(88) */
+        .vts_def = 2160, /* VS(5) + VBP(36) + VDISP(1080) + VFP(4) */
         .link_freq_idx = 0,
-        .bpp = 16,
+        .bpp = 8,
     },
 };
 
@@ -145,7 +146,7 @@ static int radiocam_write_reg(struct i2c_client *client, u8 dev_id, u32 addr, u3
     u8 rx_buf[4];
     int ret;
     tx_buf[0] = dev_id;
-    tx_buf[1] = 0;
+    tx_buf[1] = 1;
     tx_buf[2] = (addr >> 24) & 0xff;
     tx_buf[3] = (addr >> 16) & 0xff;
     tx_buf[4] = (addr >> 8) & 0xff;
@@ -253,8 +254,10 @@ static long radiocam_ioctl(struct v4l2_subdev *sd, unsigned int cmd, void *arg)
 static int __radiocam_start_stream(struct radiocam *radiocam)
 {
     // TODO: use i2c read/write reg here
-    u32 val;
-    return radiocam_read_reg(radiocam->client, 0x02, 0x00, &val);
+    return radiocam_write_reg(radiocam->client,
+                              0x02,
+                              0x00,
+                              0x01);
 }
 
 static int __radiocam_stop_stream(struct radiocam *radiocam)
@@ -316,7 +319,8 @@ static int radiocam_enum_mbus_code(struct v4l2_subdev *sd,
     if (code->index != 0)
         return -EINVAL;
 
-    code->code = MEDIA_BUS_FMT_SBGGR16_1X16;
+    //code->code = MEDIA_BUS_FMT_SBGGR16_1X16;
+    code->code = MEDIA_BUS_FMT_SBGGR8_1X8;
     return 0;
 }
 
@@ -327,7 +331,8 @@ static int radiocam_enum_frame_sizes(struct v4l2_subdev *sd,
     if (fse->index >= ARRAY_SIZE(supported_modes))
         return -EINVAL;
 
-    if (fse->code != MEDIA_BUS_FMT_SBGGR16_1X16)
+    //if (fse->code != MEDIA_BUS_FMT_SBGGR16_1X16)
+    if (fse->code != MEDIA_BUS_FMT_SBGGR8_1X8)
         return -EINVAL;
 
     fse->min_width = supported_modes[fse->index].width;
@@ -345,7 +350,8 @@ static int radiocam_enum_frame_interval(struct v4l2_subdev *sd,
     const struct radiocam_mode *mode = NULL;
     unsigned int i;
 
-    if (fie->code != 0 && fie->code != MEDIA_BUS_FMT_SBGGR16_1X16)
+    //if (fie->code != 0 && fie->code != MEDIA_BUS_FMT_SBGGR16_1X16)
+    if (fie->code != 0 && fie->code != MEDIA_BUS_FMT_SBGGR8_1X8)
         return -EINVAL;
 
     /* rkcif calls with code=0 and width=0/height=0 to enumerate all modes;
@@ -355,7 +361,8 @@ static int radiocam_enum_frame_interval(struct v4l2_subdev *sd,
         if (fie->index >= ARRAY_SIZE(supported_modes))
             return -EINVAL;
         mode = &supported_modes[fie->index];
-        fie->code = MEDIA_BUS_FMT_SBGGR16_1X16;
+        //fie->code = MEDIA_BUS_FMT_SBGGR16_1X16;
+        fie->code = MEDIA_BUS_FMT_SBGGR8_1X8;
         fie->width = mode->width;
         fie->height = mode->height;
         fie->interval = mode->max_fps;
@@ -404,7 +411,8 @@ static int radiocam_get_fmt(struct v4l2_subdev *sd,
     {
         fmt->format.width = mode->width;
         fmt->format.height = mode->height;
-        fmt->format.code = MEDIA_BUS_FMT_SBGGR16_1X16;
+        // fmt->format.code = MEDIA_BUS_FMT_SBGGR16_1X16;
+        fmt->format.code = MEDIA_BUS_FMT_SBGGR8_1X8;
         fmt->format.field = V4L2_FIELD_NONE;
     }
     mutex_unlock(&radiocam->mutex);
@@ -452,7 +460,8 @@ static int radiocam_set_fmt(struct v4l2_subdev *sd,
     u32 lane_num = RADIOCAM_LANES;
     mutex_lock(&radiocam->mutex);
     mode = radiocam_find_best_fit(fmt);
-    fmt->format.code = MEDIA_BUS_FMT_SBGGR16_1X16;
+    // fmt->format.code = MEDIA_BUS_FMT_SBGGR16_1X16;
+    fmt->format.code = MEDIA_BUS_FMT_SBGGR8_1X8;
     fmt->format.width = mode->width;
     fmt->format.height = mode->height;
     fmt->format.field = V4L2_FIELD_NONE;
@@ -527,6 +536,7 @@ static int radiocam_open(struct v4l2_subdev *sd, struct v4l2_subdev_fh *fh)
     // try_fmt->width = 0;
     // try_fmt->height = 0;
     try_fmt->code = MEDIA_BUS_FMT_SBGGR16_1X16;
+    try_fmt->code = MEDIA_BUS_FMT_SBGGR8_1X8;
     try_fmt->field = V4L2_FIELD_NONE;
 
     mutex_unlock(&radiocam->mutex);

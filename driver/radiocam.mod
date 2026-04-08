@@ -1,1 +1,0 @@
-/home/wei/Projects/opi5/radiocam-linux/driver/radiocam.o

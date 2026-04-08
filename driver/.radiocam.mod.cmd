@@ -1,1 +1,0 @@
-cmd_/home/wei/Projects/opi5/radiocam-linux/driver/radiocam.mod := printf '%s\n'   radiocam.o | awk '!x[$$0]++ { print("/home/wei/Projects/opi5/radiocam-linux/driver/"$$0) }' > /home/wei/Projects/opi5/radiocam-linux/driver/radiocam.mod

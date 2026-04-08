@@ -15,6 +15,8 @@
                     radiocam_out: endpoint {
                         remote-endpoint = <&mipi_in_ucam2>;
                         data-lanes = <1 2 3 4>;
+                        lane-polarities = <0 1 0 0 0>;
+                        link-frequencies = /bits/ 64 <160000000>;
                     };
                 };
             };
@@ -34,7 +36,8 @@
                     reg = <2>;
                     remote-endpoint = <&radiocam_out>;
                     data-lanes = <1 2 3 4>;
-                    link-frequencies = /bits/ 64 <160000000>;
+                    lane-polarities = <0 0 0 0 0>;
+                    link-frequencies = /bits/ 64 <40000000>;
                 };
             };
         };
