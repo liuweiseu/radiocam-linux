@@ -35,6 +35,7 @@
 #define RADIOCAM_PIXEL_RATE 10000000ULL
 
 #define RADIOCAM_LANES 4
+#define RADIOCAM_VBLANK 1080
 
 static const s64 link_freq_menu_items[] = {
     RADIOCAM_LINK_FREQ_160MHZ,
@@ -65,6 +66,7 @@ struct radiocam
     struct media_pad pad;
     struct v4l2_ctrl_handler ctrl_handler;
     struct v4l2_ctrl *exposure;
+    struct v4l2_ctrl *vblank;
     struct mutex mutex;
     bool streaming;
     bool power_on;
@@ -79,17 +81,17 @@ struct radiocam
 
 static const struct radiocam_mode supported_modes[] = {
     {
-        .width = 1920,
+        .width = 2048,
         .height = 1080,
         .max_fps = {
-            .numerator = 162, //33,
-            .denominator = 3125, //500, /* 500/33 ≈ 30.3/2 fps
+            .numerator = 3456, //33,
+            .denominator = 15625, //500, /* 500/33 ≈ 30.3/2 fps
                                  // * = pixel_rate / (HTS * VTS)
                                  // * = 75,000,000 / (2200 * 1125) */
         },
         .exp_def = 0x0440,
         //.hts_def = 4800,
-        .hts_def = 3840, /* HS(44) + HBP(148) + HDISP(1920) + HFP(88) */
+        .hts_def = 4096, /* HS(44) + HBP(148) + HDISP(1920) + HFP(88) */
         .vts_def = 2160, /* VS(5) + VBP(36) + VDISP(1080) + VFP(4) */
         .link_freq_idx = 0,
         .bpp = 8,
@@ -552,6 +554,22 @@ static const struct v4l2_subdev_internal_ops radiocam_internal_ops = {
 };
 #endif
 
+static int sensor_get_controls(struct v4l2_ctrl *ctrl)
+{
+    struct radiocam *radiocam = container_of(ctrl->handler, struct radiocam, ctrl_handler);
+
+    switch (ctrl->id)
+    {
+    case V4L2_CID_VBLANK:
+        ctrl->val = RADIOCAM_VBLANK;
+        break;
+    default:
+        dev_dbg(&radiocam->client->dev, "sensor_get_controls: unknown ctrl id 0x%x\n", ctrl->id);
+        return -EINVAL;
+    }
+    return 0;
+}
+
 static int radiocam_s_ctrl(struct v4l2_ctrl *ctrl)
 {
     struct radiocam *radiocam = container_of(ctrl->handler, struct radiocam, ctrl_handler);
@@ -568,6 +586,7 @@ static int radiocam_s_ctrl(struct v4l2_ctrl *ctrl)
 }
 
 static const struct v4l2_ctrl_ops radiocam_ctrl_ops = {
+    .g_volatile_ctrl = sensor_get_controls,
     .s_ctrl = radiocam_s_ctrl,
 };
 
@@ -589,9 +608,16 @@ static int radiocam_initialize_controls(struct radiocam *radiocam)
     int ret;
 
     handler = &radiocam->ctrl_handler;
-    ret = v4l2_ctrl_handler_init(handler, 3);
+    ret = v4l2_ctrl_handler_init(handler, 4);
     if (ret)
         return ret;
+
+    /* vblank — volatile, fixed at RADIOCAM_VBLANK lines */
+    radiocam->vblank = v4l2_ctrl_new_std(handler, &radiocam_ctrl_ops,
+                                         V4L2_CID_VBLANK,
+                                         RADIOCAM_VBLANK, RADIOCAM_VBLANK, 1, RADIOCAM_VBLANK);
+    if (radiocam->vblank)
+        radiocam->vblank->flags |= V4L2_CTRL_FLAG_VOLATILE;
 
     /* pixel rate — read-only, 75 MHz as provided by hardware */
     v4l2_ctrl_new_std(handler, NULL,
