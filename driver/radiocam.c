@@ -30,9 +30,9 @@
 #define RADIOCAM_NAME "radiocam"
 #define DRIVER_VERSION KERNEL_VERSION(0, 0x00, 0x03)
 
-#define RADIOCAM_LINK_FREQ_160MHZ 40000000
+#define RADIOCAM_LINK_FREQ_160MHZ 160000000
 /* actual pixel rate provided by hardware: 75 MHz */
-#define RADIOCAM_PIXEL_RATE 10000000ULL
+#define RADIOCAM_PIXEL_RATE 40000000ULL
 
 #define RADIOCAM_LANES 4
 #define RADIOCAM_VBLANK 1080
@@ -84,7 +84,7 @@ static const struct radiocam_mode supported_modes[] = {
         .width = 2048,
         .height = 1080,
         .max_fps = {
-            .numerator = 3456, //33,
+            .numerator = 864, //33,
             .denominator = 15625, //500, /* 500/33 ≈ 30.3/2 fps
                                  // * = pixel_rate / (HTS * VTS)
                                  // * = 75,000,000 / (2200 * 1125) */

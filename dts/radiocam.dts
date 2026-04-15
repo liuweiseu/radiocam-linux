@@ -37,7 +37,7 @@
                     remote-endpoint = <&radiocam_out>;
                     data-lanes = <1 2 3 4>;
                     lane-polarities = <0 0 0 0 0>;
-                    link-frequencies = /bits/ 64 <40000000>;
+                    link-frequencies = /bits/ 64 <160000000>;
                 };
             };
         };
