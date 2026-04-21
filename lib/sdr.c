@@ -146,7 +146,7 @@ int sdr_set_control(uint32_t id, int value) {
 }
 
 
-int sdr_set_adc_config(int value) {
+int sdr_set_adc_config(int reg_addr, int reg_val) {
     //not implemented
     return 0;
 }
