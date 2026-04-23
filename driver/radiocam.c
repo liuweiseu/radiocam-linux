@@ -32,13 +32,14 @@
 
 #define RADIOCAM_LINK_FREQ_160MHZ 160000000
 /* actual pixel rate provided by hardware: 75 MHz */
-#define RADIOCAM_PIXEL_RATE 40000000ULL
+//#define RADIOCAM_PIXEL_RATE 40000000ULL
+#define RADIOCAM_PIXEL_RATE   125000000ULL
 
 #define RADIOCAM_LANES 4
-#define RADIOCAM_VBLANK 1080
+#define RADIOCAM_VBLANK 4
 
-static const s64 link_freq_menu_items[] = {
-    RADIOCAM_LINK_FREQ_160MHZ,
+    static const s64 link_freq_menu_items[] = {
+        RADIOCAM_LINK_FREQ_160MHZ,
 };
 #if IS_ENABLED(CONFIG_OF)
 static const struct of_device_id radiocam_of_match[] = {
@@ -84,15 +85,13 @@ static const struct radiocam_mode supported_modes[] = {
         .width = 2048,
         .height = 1080,
         .max_fps = {
-            .numerator = 864, //33,
-            .denominator = 15625, //500, /* 500/33 ≈ 30.3/2 fps
-                                 // * = pixel_rate / (HTS * VTS)
-                                 // * = 75,000,000 / (2200 * 1125) */
+            .numerator = 176963,
+            .denominator = 10000000,
         },
         .exp_def = 0x0440,
         //.hts_def = 4800,
-        .hts_def = 4096, /* HS(44) + HBP(148) + HDISP(1920) + HFP(88) */
-        .vts_def = 2160, /* VS(5) + VBP(36) + VDISP(1080) + VFP(4) */
+        .hts_def = 2612, /* HS(168) + HBP(242) + HDISP(2048) + HFP(274) */
+        .vts_def = 1086, /* VS(2) + VBP(1) + VDISP(1080) + VFP(1)*/
         .link_freq_idx = 0,
         .bpp = 8,
     },
