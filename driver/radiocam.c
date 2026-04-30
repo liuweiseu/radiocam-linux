@@ -85,13 +85,13 @@ static const struct radiocam_mode supported_modes[] = {
         .width = 2048,
         .height = 1080,
         .max_fps = {
-            .numerator = 176963,
-            .denominator = 10000000,
+            .numerator = 6912,
+            .denominator = 390625,
         },
         .exp_def = 0x0440,
         //.hts_def = 4800,
-        .hts_def = 2612, /* HS(168) + HBP(242) + HDISP(2048) + HFP(274) */
-        .vts_def = 1086, /* VS(2) + VBP(1) + VDISP(1080) + VFP(1)*/
+        .hts_def = 2616, /* HS(52) + HBP(242) + HDISP(2048) + HFP(274) */
+        .vts_def = 1082, /* VS(1) + VBP(0) + VDISP(1080) + VFP(1)*/
         .link_freq_idx = 0,
         .bpp = 8,
     },
