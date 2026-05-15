@@ -1,0 +1,1 @@
+/usr/bin/cc  -Wall -Wextra CMakeFiles/sdr_transfer_test.dir/sdr_test.c.o -o sdr_transfer_test  libsdr_lib.a 

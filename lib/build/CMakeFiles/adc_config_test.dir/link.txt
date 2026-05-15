@@ -1,0 +1,1 @@
+/usr/bin/cc  -Wall -Wextra CMakeFiles/adc_config_test.dir/adc_config_test.c.o -o adc_config_test  libsdr_lib.a 

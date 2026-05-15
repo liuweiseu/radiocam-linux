@@ -1,0 +1,2 @@
+/usr/bin/ar qc libsdr_lib.a CMakeFiles/sdr_lib.dir/sdr_config.c.o CMakeFiles/sdr_lib.dir/sdr_transfer.c.o
+/usr/bin/ranlib libsdr_lib.a

@@ -1,0 +1,5 @@
+/home/pranav/EIGSEP/radiocam-linux/lib/build/CMakeFiles/sdr_lib.dir
+/home/pranav/EIGSEP/radiocam-linux/lib/build/CMakeFiles/adc_config_test.dir
+/home/pranav/EIGSEP/radiocam-linux/lib/build/CMakeFiles/sdr_transfer_test.dir
+/home/pranav/EIGSEP/radiocam-linux/lib/build/CMakeFiles/edit_cache.dir
+/home/pranav/EIGSEP/radiocam-linux/lib/build/CMakeFiles/rebuild_cache.dir
