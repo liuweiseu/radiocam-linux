@@ -28,9 +28,9 @@
 #include "radiocam.h"
 
 #define RADIOCAM_NAME "radiocam"
-#define DRIVER_VERSION KERNEL_VERSION(0, 0x00, 0x07)
+#define DRIVER_VERSION KERNEL_VERSION(0, 0x00, 0x08)
 
-#define RADIOCAM_LINK_FREQ_160MHZ 140625000
+#define RADIOCAM_LINK_FREQ 156250000
 /* actual pixel rate provided by hardware: 75 MHz */
 //#define RADIOCAM_PIXEL_RATE 40000000ULL
 #define RADIOCAM_PIXEL_RATE   125000000ULL
@@ -39,7 +39,7 @@
 #define RADIOCAM_VBLANK 2
 
     static const s64 link_freq_menu_items[] = {
-        RADIOCAM_LINK_FREQ_160MHZ,
+        RADIOCAM_LINK_FREQ,
 };
 #if IS_ENABLED(CONFIG_OF)
 static const struct of_device_id radiocam_of_match[] = {
@@ -90,7 +90,7 @@ static const struct radiocam_mode supported_modes[] = {
         },
         .exp_def = 0x0440,
         //.hts_def = 4800,
-        .hts_def = 2304, /* HS(48) + HBP(100) + HDISP(2048) + HFP(100) */
+        .hts_def = 2560, /* HS(56) + HBP(120) + HDISP(2048) + HFP(120) + 216 ((10+31+13)*4) */
         .vts_def = 1082, /* VS(1) + VBP(0) + VDISP(1080) + VFP(1)*/
         .link_freq_idx = 0,
         .bpp = 8,
