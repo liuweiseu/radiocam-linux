@@ -691,8 +691,8 @@ static long radiocam_mdev_ioctl(struct file *filp, unsigned int cmd,
         u32 fw_ver = 0;
         int ret;
         mutex_lock(&radiocam->mutex);
-        ret = radiocam_read_reg(client, RADIOCAM_DEV_DEBUG,
-                                RADIOCAM_DEBUG_VERSION_REG, &fw_ver);
+        ret = radiocam_read_reg(client, RADIOCAM_DEV_SYSMON,
+                                RADIOCAM_SYSMON_VERSION_REG, &fw_ver);
         mutex_unlock(&radiocam->mutex);
         if (ret < 0)
             return ret;
