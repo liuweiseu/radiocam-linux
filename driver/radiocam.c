@@ -12,11 +12,13 @@
 #include <linux/delay.h>
 #include <linux/gpio/consumer.h>
 #include <linux/i2c.h>
+#include <linux/miscdevice.h>
 #include <linux/module.h>
 #include <linux/pm_runtime.h>
 #include <linux/regulator/consumer.h>
 #include <linux/sysfs.h>
 #include <linux/slab.h>
+#include <linux/uaccess.h>
 #include <linux/version.h>
 #include <linux/rk-camera-module.h>
 #include <media/media-entity.h>
@@ -76,6 +78,7 @@ struct radiocam
     struct v4l2_device v4l2_dev;
     struct video_device video_dev;
     struct media_device media_dev;
+    struct miscdevice mdev;
 };
 
 #define to_radiocam(sd) container_of(sd, struct radiocam, subdev)
@@ -647,6 +650,116 @@ err_free_handler:
     v4l2_ctrl_handler_free(handler);
     return ret;
 }
+/**********************************************************************/
+/*************** miscdevice: expose I2C to userspace ******************/
+/**********************************************************************/
+
+/* I2C_RDWR ioctl — same wire format as i2c-dev, so python-periphery works */
+#define RADIOCAM_I2C_RDWR      0x0707
+#define RADIOCAM_I2C_MAX_MSGS  42
+#define RADIOCAM_I2C_MAX_BUF   8192
+
+struct radiocam_i2c_rdwr_data {
+    struct i2c_msg __user *msgs;
+    __u32 nmsgs;
+};
+
+static int radiocam_mdev_open(struct inode *inode, struct file *filp)
+{
+    struct miscdevice *mdev = filp->private_data;
+    filp->private_data = container_of(mdev, struct radiocam, mdev);
+    return 0;
+}
+
+static long radiocam_mdev_ioctl(struct file *filp, unsigned int cmd,
+                                unsigned long arg)
+{
+    struct radiocam *radiocam = filp->private_data;
+    struct i2c_client *client = radiocam->client;
+    struct radiocam_i2c_rdwr_data rdwr;
+    struct i2c_msg *msgs = NULL;
+    u8 __user **user_bufs = NULL;
+    u8 **kbufs = NULL;
+    unsigned int i;
+    int ret;
+
+    if (cmd != RADIOCAM_I2C_RDWR)
+        return -ENOTTY;
+
+    if (copy_from_user(&rdwr, (struct radiocam_i2c_rdwr_data __user *)arg,
+                       sizeof(rdwr)))
+        return -EFAULT;
+
+    if (rdwr.nmsgs == 0 || rdwr.nmsgs > RADIOCAM_I2C_MAX_MSGS)
+        return -EINVAL;
+
+    msgs = kmalloc_array(rdwr.nmsgs, sizeof(*msgs), GFP_KERNEL);
+    user_bufs = kcalloc(rdwr.nmsgs, sizeof(*user_bufs), GFP_KERNEL);
+    kbufs = kcalloc(rdwr.nmsgs, sizeof(*kbufs), GFP_KERNEL);
+    if (!msgs || !user_bufs || !kbufs) {
+        ret = -ENOMEM;
+        goto out;
+    }
+
+    if (copy_from_user(msgs, rdwr.msgs, rdwr.nmsgs * sizeof(*msgs))) {
+        ret = -EFAULT;
+        goto out;
+    }
+
+    for (i = 0; i < rdwr.nmsgs; i++) {
+        if (msgs[i].addr != client->addr) {
+            ret = -EPERM;
+            goto out;
+        }
+        if (msgs[i].len == 0 || msgs[i].len > RADIOCAM_I2C_MAX_BUF) {
+            ret = -EINVAL;
+            goto out;
+        }
+        user_bufs[i] = (u8 __user *)(uintptr_t)msgs[i].buf;
+        kbufs[i] = kmalloc(msgs[i].len, GFP_KERNEL);
+        if (!kbufs[i]) {
+            ret = -ENOMEM;
+            goto out;
+        }
+        msgs[i].buf = kbufs[i];
+        if (!(msgs[i].flags & I2C_M_RD)) {
+            if (copy_from_user(kbufs[i], user_bufs[i], msgs[i].len)) {
+                ret = -EFAULT;
+                goto out;
+            }
+        }
+    }
+
+    mutex_lock(&radiocam->mutex);
+    ret = i2c_transfer(client->adapter, msgs, rdwr.nmsgs);
+    mutex_unlock(&radiocam->mutex);
+
+    if (ret == (int)rdwr.nmsgs) {
+        for (i = 0; i < rdwr.nmsgs; i++) {
+            if (msgs[i].flags & I2C_M_RD) {
+                if (copy_to_user(user_bufs[i], kbufs[i], msgs[i].len))
+                    ret = -EFAULT;
+            }
+        }
+    }
+
+out:
+    if (kbufs) {
+        for (i = 0; i < rdwr.nmsgs; i++)
+            kfree(kbufs[i]);
+        kfree(kbufs);
+    }
+    kfree(user_bufs);
+    kfree(msgs);
+    return ret;
+}
+
+static const struct file_operations radiocam_mdev_fops = {
+    .owner          = THIS_MODULE,
+    .open           = radiocam_mdev_open,
+    .unlocked_ioctl = radiocam_mdev_ioctl,
+};
+
 /*
 *********************** probe and remove functions *************************
 */
@@ -712,8 +825,22 @@ static int radiocam_probe(struct i2c_client *client,
         dev_err(dev, "v4l2 async register subdev failed\n");
         goto err_clean_entity;
     }
+
+    radiocam->mdev.minor = MISC_DYNAMIC_MINOR;
+    radiocam->mdev.name  = RADIOCAM_NAME "-i2c";
+    radiocam->mdev.fops  = &radiocam_mdev_fops;
+    ret = misc_register(&radiocam->mdev);
+    if (ret)
+    {
+        dev_err(dev, "failed to register miscdevice: %d\n", ret);
+        goto err_unreg_subdev;
+    }
+
     dev_info(dev, "radiocam subdev registered with devnode\n");
     return 0;
+
+err_unreg_subdev:
+    v4l2_async_unregister_subdev(sd);
 
 err_clean_entity:
 #if defined(CONFIG_MEDIA_CONTROLLER)
@@ -731,6 +858,7 @@ static void radiocam_remove(struct i2c_client *client)
     struct v4l2_subdev *sd = i2c_get_clientdata(client);
     struct radiocam *radiocam = to_radiocam(sd);
 
+    misc_deregister(&radiocam->mdev);
     v4l2_async_unregister_subdev(sd);
 #if defined(CONFIG_MEDIA_CONTROLLER)
     media_entity_cleanup(&sd->entity);
