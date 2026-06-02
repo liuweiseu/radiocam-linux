@@ -652,8 +652,9 @@ err_free_handler:
 /*************** miscdevice: expose I2C to userspace ******************/
 /**********************************************************************/
 
-/* I2C_RDWR ioctl — same wire format as i2c-dev, so python-periphery works */
-#define RADIOCAM_I2C_RDWR      0x0707
+/* i2c-dev ABI ioctls used by python-periphery (not in kernel-internal headers) */
+#define I2C_FUNCS          0x0705   /* query adapter functionality */
+#define RADIOCAM_I2C_RDWR  0x0707   /* submit I2C_RDWR message array */
 #define RADIOCAM_I2C_MAX_MSGS  42
 #define RADIOCAM_I2C_MAX_BUF   8192
 
@@ -699,6 +700,14 @@ static long radiocam_mdev_ioctl(struct file *filp, unsigned int cmd,
         ver.fw_minor = (fw_ver >> 8)  & 0xff;
         ver.fw_patch =  fw_ver        & 0xff;
         if (copy_to_user((struct radiocam_version __user *)arg, &ver, sizeof(ver)))
+            return -EFAULT;
+        return 0;
+    }
+
+    /* python-periphery queries I2C_FUNCS on open; report I2C_FUNC_I2C support. */
+    if (cmd == I2C_FUNCS) {
+        unsigned long funcs = I2C_FUNC_I2C;
+        if (copy_to_user((unsigned long __user *)arg, &funcs, sizeof(funcs)))
             return -EFAULT;
         return 0;
     }
