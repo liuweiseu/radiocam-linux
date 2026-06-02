@@ -256,20 +256,18 @@ static long radiocam_ioctl(struct v4l2_subdev *sd, unsigned int cmd, void *arg)
 
 static int __radiocam_start_stream(struct radiocam *radiocam)
 {
-    // TODO: use i2c read/write reg here
     return radiocam_write_reg(radiocam->client,
-                              0x02,
-                              0x00,
-                              0x01);
+                              RADIOCAM_DEV_MIPI,
+                              RADIOCAM_MIPI_STREAM_REG,
+                              RADIOCAM_MIPI_STREAM_ON);
 }
 
 static int __radiocam_stop_stream(struct radiocam *radiocam)
 {
-    // TODO: use i2c read/write reg here
     return radiocam_write_reg(radiocam->client,
-                              0x02,
-                              0x00,
-                              0x00);
+                              RADIOCAM_DEV_MIPI,
+                              RADIOCAM_MIPI_STREAM_REG,
+                              RADIOCAM_MIPI_STREAM_OFF);
 }
 
 static int radiocam_s_stream(struct v4l2_subdev *sd, int on)
@@ -682,6 +680,28 @@ static long radiocam_mdev_ioctl(struct file *filp, unsigned int cmd,
     u8 **kbufs = NULL;
     unsigned int i;
     int ret;
+
+    if (cmd == RADIOCAM_GET_VERSION) {
+        struct radiocam_version ver = {
+            .major = DRIVER_VERSION >> 16,
+            .minor = (DRIVER_VERSION >> 8) & 0xff,
+            .patch = DRIVER_VERSION & 0xff,
+        };
+        u32 fw_ver = 0;
+        int ret;
+        mutex_lock(&radiocam->mutex);
+        ret = radiocam_read_reg(client, RADIOCAM_DEV_DEBUG,
+                                RADIOCAM_DEBUG_VERSION_REG, &fw_ver);
+        mutex_unlock(&radiocam->mutex);
+        if (ret < 0)
+            return ret;
+        ver.fw_major = (fw_ver >> 16) & 0xff;
+        ver.fw_minor = (fw_ver >> 8)  & 0xff;
+        ver.fw_patch =  fw_ver        & 0xff;
+        if (copy_to_user((struct radiocam_version __user *)arg, &ver, sizeof(ver)))
+            return -EFAULT;
+        return 0;
+    }
 
     if (cmd != RADIOCAM_I2C_RDWR)
         return -ENOTTY;
