@@ -14,17 +14,6 @@ struct radiocam_status
 #define RADIOCAM_GET_STATUS _IOR('M', 0, struct radiocam_status)
 #define RADIOCAM_SET_MODE _IOW('M', 1, int)
 
-/* ioctl codes for the /dev/radiocam-i2c miscdevice (magic byte 'R') */
-struct radiocam_version {
-    __u32 major;       /* kernel driver version (from DRIVER_VERSION) */
-    __u32 minor;
-    __u32 patch;
-    __u32 fw_major;    /* MCU firmware version (read from DEV_ID_SYSMON) */
-    __u32 fw_minor;
-    __u32 fw_patch;
-};
-#define RADIOCAM_GET_VERSION _IOR('R', 0, struct radiocam_version)
-
 /* MCU device ID and register constants.
  * Must match choosecmd.h / firmware_version.h in radiocam-firmware. */
 #define RADIOCAM_DEV_SYSMON          0x01

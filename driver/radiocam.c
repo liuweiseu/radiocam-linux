@@ -12,7 +12,6 @@
 #include <linux/delay.h>
 #include <linux/gpio/consumer.h>
 #include <linux/i2c.h>
-#include <linux/miscdevice.h>
 #include <linux/module.h>
 #include <linux/pm_runtime.h>
 #include <linux/regulator/consumer.h>
@@ -78,7 +77,7 @@ struct radiocam
     struct v4l2_device v4l2_dev;
     struct video_device video_dev;
     struct media_device media_dev;
-    struct miscdevice mdev;
+    struct i2c_adapter adapter;
 };
 
 #define to_radiocam(sd) container_of(sd, struct radiocam, subdev)
@@ -649,144 +648,33 @@ err_free_handler:
     return ret;
 }
 /**********************************************************************/
-/*************** miscdevice: expose I2C to userspace ******************/
+/************* i2c_adapter: expose I2C to userspace (i2c-dev) *********/
 /**********************************************************************/
 
-/* i2c-dev ABI ioctls used by python-periphery (not in kernel-internal headers) */
-#define I2C_FUNCS          0x0705   /* query adapter functionality */
-#define RADIOCAM_I2C_RDWR  0x0707   /* submit I2C_RDWR message array */
-#define RADIOCAM_I2C_MAX_MSGS  42
-#define RADIOCAM_I2C_MAX_BUF   8192
-
-struct radiocam_i2c_rdwr_data {
-    struct i2c_msg __user *msgs;
-    __u32 nmsgs;
-};
-
-static int radiocam_mdev_open(struct inode *inode, struct file *filp)
+static int radiocam_i2c_master_xfer(struct i2c_adapter *adap,
+                                    struct i2c_msg *msgs, int num)
 {
-    struct miscdevice *mdev = filp->private_data;
-    filp->private_data = container_of(mdev, struct radiocam, mdev);
-    return 0;
-}
+    struct radiocam *radiocam = i2c_get_adapdata(adap);
+    int i, ret;
 
-static long radiocam_mdev_ioctl(struct file *filp, unsigned int cmd,
-                                unsigned long arg)
-{
-    struct radiocam *radiocam = filp->private_data;
-    struct i2c_client *client = radiocam->client;
-    struct radiocam_i2c_rdwr_data rdwr;
-    struct i2c_msg *msgs = NULL;
-    u8 __user **user_bufs = NULL;
-    u8 **kbufs = NULL;
-    unsigned int i;
-    int ret;
-
-    if (cmd == RADIOCAM_GET_VERSION) {
-        struct radiocam_version ver = {
-            .major = DRIVER_VERSION >> 16,
-            .minor = (DRIVER_VERSION >> 8) & 0xff,
-            .patch = DRIVER_VERSION & 0xff,
-        };
-        u32 fw_ver = 0;
-        int ret;
-        mutex_lock(&radiocam->mutex);
-        ret = radiocam_read_reg(client, RADIOCAM_DEV_SYSMON,
-                                RADIOCAM_SYSMON_VERSION_REG, &fw_ver);
-        mutex_unlock(&radiocam->mutex);
-        if (ret < 0)
-            return ret;
-        ver.fw_major = (fw_ver >> 16) & 0xff;
-        ver.fw_minor = (fw_ver >> 8)  & 0xff;
-        ver.fw_patch =  fw_ver        & 0xff;
-        if (copy_to_user((struct radiocam_version __user *)arg, &ver, sizeof(ver)))
-            return -EFAULT;
-        return 0;
-    }
-
-    /* python-periphery queries I2C_FUNCS on open; report I2C_FUNC_I2C support. */
-    if (cmd == I2C_FUNCS) {
-        unsigned long funcs = I2C_FUNC_I2C;
-        if (copy_to_user((unsigned long __user *)arg, &funcs, sizeof(funcs)))
-            return -EFAULT;
-        return 0;
-    }
-
-    if (cmd != RADIOCAM_I2C_RDWR)
-        return -ENOTTY;
-
-    if (copy_from_user(&rdwr, (struct radiocam_i2c_rdwr_data __user *)arg,
-                       sizeof(rdwr)))
-        return -EFAULT;
-
-    if (rdwr.nmsgs == 0 || rdwr.nmsgs > RADIOCAM_I2C_MAX_MSGS)
-        return -EINVAL;
-
-    msgs = kmalloc_array(rdwr.nmsgs, sizeof(*msgs), GFP_KERNEL);
-    user_bufs = kcalloc(rdwr.nmsgs, sizeof(*user_bufs), GFP_KERNEL);
-    kbufs = kcalloc(rdwr.nmsgs, sizeof(*kbufs), GFP_KERNEL);
-    if (!msgs || !user_bufs || !kbufs) {
-        ret = -ENOMEM;
-        goto out;
-    }
-
-    if (copy_from_user(msgs, rdwr.msgs, rdwr.nmsgs * sizeof(*msgs))) {
-        ret = -EFAULT;
-        goto out;
-    }
-
-    for (i = 0; i < rdwr.nmsgs; i++) {
-        if (msgs[i].addr != client->addr) {
-            ret = -EPERM;
-            goto out;
-        }
-        if (msgs[i].len == 0 || msgs[i].len > RADIOCAM_I2C_MAX_BUF) {
-            ret = -EINVAL;
-            goto out;
-        }
-        user_bufs[i] = (u8 __user *)(uintptr_t)msgs[i].buf;
-        kbufs[i] = kmalloc(msgs[i].len, GFP_KERNEL);
-        if (!kbufs[i]) {
-            ret = -ENOMEM;
-            goto out;
-        }
-        msgs[i].buf = kbufs[i];
-        if (!(msgs[i].flags & I2C_M_RD)) {
-            if (copy_from_user(kbufs[i], user_bufs[i], msgs[i].len)) {
-                ret = -EFAULT;
-                goto out;
-            }
-        }
-    }
+    for (i = 0; i < num; i++)
+        if (msgs[i].addr != radiocam->client->addr)
+            return -EPERM;
 
     mutex_lock(&radiocam->mutex);
-    ret = i2c_transfer(client->adapter, msgs, rdwr.nmsgs);
+    ret = i2c_transfer(radiocam->client->adapter, msgs, num);
     mutex_unlock(&radiocam->mutex);
-
-    if (ret == (int)rdwr.nmsgs) {
-        for (i = 0; i < rdwr.nmsgs; i++) {
-            if (msgs[i].flags & I2C_M_RD) {
-                if (copy_to_user(user_bufs[i], kbufs[i], msgs[i].len))
-                    ret = -EFAULT;
-            }
-        }
-    }
-
-out:
-    if (kbufs) {
-        for (i = 0; i < rdwr.nmsgs; i++)
-            kfree(kbufs[i]);
-        kfree(kbufs);
-    }
-    kfree(user_bufs);
-    kfree(msgs);
     return ret;
 }
 
-static const struct file_operations radiocam_mdev_fops = {
-    .owner          = THIS_MODULE,
-    .open           = radiocam_mdev_open,
-    .unlocked_ioctl = radiocam_mdev_ioctl,
+static u32 radiocam_i2c_functionality(struct i2c_adapter *adap)
+{
+    return I2C_FUNC_I2C;
+}
+
+static const struct i2c_algorithm radiocam_i2c_algo = {
+    .master_xfer   = radiocam_i2c_master_xfer,
+    .functionality = radiocam_i2c_functionality,
 };
 
 /*
@@ -855,13 +743,16 @@ static int radiocam_probe(struct i2c_client *client,
         goto err_clean_entity;
     }
 
-    radiocam->mdev.minor = MISC_DYNAMIC_MINOR;
-    radiocam->mdev.name  = RADIOCAM_NAME "-i2c";
-    radiocam->mdev.fops  = &radiocam_mdev_fops;
-    ret = misc_register(&radiocam->mdev);
+    radiocam->adapter.owner      = THIS_MODULE;
+    radiocam->adapter.algo       = &radiocam_i2c_algo;
+    radiocam->adapter.dev.parent = dev;
+    i2c_set_adapdata(&radiocam->adapter, radiocam);
+    snprintf(radiocam->adapter.name, sizeof(radiocam->adapter.name),
+             "radiocam-i2c");
+    ret = i2c_add_adapter(&radiocam->adapter);
     if (ret)
     {
-        dev_err(dev, "failed to register miscdevice: %d\n", ret);
+        dev_err(dev, "failed to register i2c adapter: %d\n", ret);
         goto err_unreg_subdev;
     }
 
@@ -887,7 +778,7 @@ static void radiocam_remove(struct i2c_client *client)
     struct v4l2_subdev *sd = i2c_get_clientdata(client);
     struct radiocam *radiocam = to_radiocam(sd);
 
-    misc_deregister(&radiocam->mdev);
+    i2c_del_adapter(&radiocam->adapter);
     v4l2_async_unregister_subdev(sd);
 #if defined(CONFIG_MEDIA_CONTROLLER)
     media_entity_cleanup(&sd->entity);
@@ -926,3 +817,4 @@ module_exit(sensor_mod_exit);
 
 MODULE_DESCRIPTION("UCB-RAL radiocam driver");
 MODULE_LICENSE("GPL v2");
+MODULE_VERSION("0.0.9");
