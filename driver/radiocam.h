@@ -24,10 +24,16 @@ struct radiocam_status
 #define RADIOCAM_MIPI_STREAM_ON      0x01
 #define RADIOCAM_MIPI_STREAM_OFF     0x00
 
-/* customized v4l2 controk IDs */
-#define V4L2_CTRL_CLASS_USER 0x00980000 /* Old-style 'user' controls */
+/* customized v4l2 control IDs */
+#ifndef V4L2_CTRL_CLASS_USER
+#define V4L2_CTRL_CLASS_USER 0x00980000
+#endif
+#ifndef V4L2_CID_BASE
 #define V4L2_CID_BASE (V4L2_CTRL_CLASS_USER | 0x900)
+#endif
+#ifndef V4L2_CID_USER_BASE
 #define V4L2_CID_USER_BASE V4L2_CID_BASE
+#endif
 #define V4L2_CID_RADIOCAM_SETTING (V4L2_CID_USER_BASE + 0x1000)
 // #define V4L2_CID_MY_SETTING (V4L2_CID_MY_CUSTOM_OFFSET + 1)
 
