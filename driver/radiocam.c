@@ -29,7 +29,7 @@
 #include "radiocam.h"
 
 #define RADIOCAM_NAME "radiocam"
-#define DRIVER_VERSION KERNEL_VERSION(0, 0x00, 0x09)
+#define DRIVER_VERSION KERNEL_VERSION(0, 0x02, 0x00)
 
 #define RADIOCAM_LINK_FREQ 156250000
 /* actual pixel rate provided by hardware: 75 MHz */
