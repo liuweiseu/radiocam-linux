@@ -7,13 +7,14 @@
 
 int main(int argc, char **argv) {
     // Default values if the user doesn't provide any arguments
-    char mode[10] = "quad";
-    int fs = 250;
+    char mode[10] = "dual";
+    int fs = 125;
+    char test_mode[10] = "normal"; // New default test mode
     int opt;
 
     // Parse command line arguments using getopt
-    // "m:f:h" means it expects -m <value>, -f <value>, and an optional -h
-    while ((opt = getopt(argc, argv, "m:f:h")) != -1) {
+    // "m:f:t:h" means it expects -m, -f, -t (all with values), and an optional -h
+    while ((opt = getopt(argc, argv, "m:f:t:h")) != -1) {
         switch (opt) {
             case 'm':
                 strncpy(mode, optarg, 9);
@@ -22,19 +23,24 @@ int main(int argc, char **argv) {
             case 'f':
                 fs = atoi(optarg);
                 break;
+            case 't':
+                strncpy(test_mode, optarg, 9);
+                test_mode[9] = '\0'; // Ensure null-termination
+                break;
             case 'h':
-                printf("Usage: %s [-m mode (quad|dual)] [-f fs (125|250)]\n", argv[0]);
-                printf("  -m : Set ADC channel mode. Default: quad\n");
-                printf("  -f : Set sampling frequency in MHz. Default: 250\n");
+                printf("Usage: %s [-m mode] [-f fs] [-t test_mode]\n", argv[0]);
+                printf("  -m : Set ADC channel mode (quad|dual). Default: dual\n");
+                printf("  -f : Set sampling frequency in MHz (125|250). Default: 125\n");
+                printf("  -t : Set test pattern mode (normal|ramp|sync|custom). Default: normal\n");
                 return EXIT_SUCCESS;
             default:
-                fprintf(stderr, "Usage: %s [-m mode] [-f fs]\n", argv[0]);
+                fprintf(stderr, "Usage: %s [-m mode] [-f fs] [-t test_mode]\n", argv[0]);
                 return EXIT_FAILURE;
         }
     }
 
     printf("--- Starting SDR ADC Configuration Test ---\n");
-    printf("Target Configuration -> Mode: %s, FS: %d MHz\n", mode, fs);
+    printf("Target Configuration -> Mode: %s, FS: %d MHz, Test Mode: %s\n", mode, fs, test_mode);
 
     // 1. Initialize the configuration interfaces
     if (sdr_config_init() < 0) {
@@ -55,9 +61,11 @@ int main(int argc, char **argv) {
         fprintf(stderr, "Error: Failed to set ADC mode.\n");
     }
 
-    // 4. Configure Test Pattern (Hardcoded to ramp for this test)
-    printf("3. Setting ADC Test Mode to 'ramp'...\n");
-    if (sdr_configure_test_mode("ramp", 0) < 0) {
+    // 4. Configure Test Pattern using the command line variable!
+    printf("3. Setting ADC Test Mode to '%s'...\n", test_mode);
+    // Note: If test_mode is "custom", it will use 0xAA as the pattern.
+    // The second argument is ignored for normal, ramp, and sync.
+    if (sdr_configure_test_mode(test_mode, 0xAA) < 0) { 
         fprintf(stderr, "Error: Failed to set test mode.\n");
     }
 
