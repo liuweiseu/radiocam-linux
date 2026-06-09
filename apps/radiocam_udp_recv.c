@@ -260,7 +260,7 @@ int main(int argc, char **argv)
             break;
         }
         if (radiocam_udp_header_decode(packet, (size_t)n, &h) == -1 ||
-            h.payload_len + RADIOCAM_UDP_HEADER_LEN != (uint32_t)n) {
+            h.payload_len + h.header_len != (uint32_t)n) {
             st.bad_packets++;
         } else {
             st.packets++;

@@ -17,6 +17,7 @@
 #include <sys/ioctl.h>
 #include <sys/mman.h>
 #include <sys/socket.h>
+#include <sys/stat.h>
 #include <sys/time.h>
 #include <sys/uio.h>
 #include <time.h>
@@ -62,6 +63,12 @@ struct stats {
     uint64_t last_frames;
     uint64_t last_packets;
     uint64_t last_bytes;
+};
+
+struct analysis_entry {
+    unsigned int hdr_idx;
+    size_t payload_offset;
+    size_t payload_len;
 };
 
 static volatile sig_atomic_t running = 1;
@@ -254,6 +261,35 @@ static int make_udp_socket(const char *host, int port, int sndbuf,
     return fd;
 }
 
+static struct radiocam_shm_stats *setup_shm_stats(void)
+{
+    int fd;
+    void *p;
+    struct radiocam_shm_stats *s;
+
+    fd = shm_open(RADIOCAM_UDP_SHM_NAME, O_CREAT | O_RDWR, 0644);
+    if (fd == -1) {
+        perror("shm_open");
+        return NULL;
+    }
+    if (ftruncate(fd, (off_t)sizeof(struct radiocam_shm_stats)) == -1) {
+        perror("ftruncate shm");
+        close(fd);
+        return NULL;
+    }
+    p = mmap(NULL, sizeof(struct radiocam_shm_stats),
+             PROT_READ | PROT_WRITE, MAP_SHARED, fd, 0);
+    close(fd);
+    if (p == MAP_FAILED) {
+        perror("mmap shm");
+        return NULL;
+    }
+    s = (struct radiocam_shm_stats *)p;
+    memset(s, 0, sizeof(*s));
+    s->shm_version = RADIOCAM_UDP_SHM_VERSION;
+    return s;
+}
+
 static void setup_v4l2(int fd, struct buffer **buffers_out,
                        unsigned int *count_out)
 {
@@ -376,6 +412,7 @@ static void send_analysis_packet(int fd, const struct sockaddr_in *addr,
 
 static void stream_loop(int vfd, int udp_fd, const struct sockaddr_in *dst,
                         int analysis_fd, const struct sockaddr_in *analysis_dst,
+                        struct radiocam_shm_stats *shm,
                         const struct options *opt)
 {
     enum v4l2_buf_type type = V4L2_BUF_TYPE_VIDEO_CAPTURE_MPLANE;
@@ -402,6 +439,8 @@ static void stream_loop(int vfd, int udp_fd, const struct sockaddr_in *dst,
         uint8_t *base;
         size_t offset = 0;
         uint32_t packet_in_frame = 0;
+        uint64_t frame_timestamp_us;
+        uint64_t frame_cal_count = 0;
 
         memset(&buf, 0, sizeof(buf));
         memset(planes, 0, sizeof(planes));
@@ -429,15 +468,27 @@ static void stream_loop(int vfd, int udp_fd, const struct sockaddr_in *dst,
             break;
         }
 
+        frame_timestamp_us = (uint64_t)buf.timestamp.tv_sec * 1000000ULL +
+                             (uint64_t)buf.timestamp.tv_usec;
         bytesused = planes[0].bytesused;
         base = buffers[buf.index].start;
+
+        /* First 8 bytes of every frame are the FPGA calibrated_sample_count
+         * emitted as a CSI-2 embedded data line (little-endian uint64). */
+        if (bytesused >= 8) {
+            memcpy(&frame_cal_count, base, sizeof(frame_cal_count));
+            base += 8;
+            bytesused -= 8;
+        }
 
         while (offset < bytesused && running) {
             struct mmsghdr msgs[MAX_BATCH];
             struct iovec iovs[MAX_BATCH][2];
             struct radiocam_udp_header hdrs[MAX_BATCH];
+            struct analysis_entry aq[MAX_BATCH];
             size_t lens[MAX_BATCH];
             unsigned int n = 0;
+            unsigned int n_aq = 0;
             int sent;
 
             memset(msgs, 0, sizeof(msgs));
@@ -454,8 +505,9 @@ static void stream_loop(int vfd, int udp_fd, const struct sockaddr_in *dst,
                     flags |= RADIOCAM_UDP_FLAG_FRAME_END;
 
                 radiocam_udp_header_encode(&hdrs[n], flags, opt->stream_id,
-                                            frame_id, packet_in_frame,
-                                            (uint32_t)offset, chunk);
+                                              frame_id, packet_in_frame,
+                                              (uint32_t)offset, chunk,
+                                              frame_timestamp_us, frame_cal_count);
                 iovs[n][0].iov_base = &hdrs[n];
                 iovs[n][0].iov_len = sizeof(hdrs[n]);
                 iovs[n][1].iov_base = base + offset;
@@ -468,14 +520,14 @@ static void stream_loop(int vfd, int udp_fd, const struct sockaddr_in *dst,
 
                 if (analysis_fd >= 0 && opt->analysis_every &&
                     (st.packets + n) % opt->analysis_every == 0) {
-                    struct radiocam_udp_header ahdr;
-                    radiocam_udp_header_encode(
-                        &ahdr, flags | RADIOCAM_UDP_FLAG_ANALYSIS_SAMPLE,
-                        opt->stream_id, frame_id, packet_in_frame,
-                        (uint32_t)offset, chunk);
-                    send_analysis_packet(analysis_fd, analysis_dst, &ahdr,
-                                         base + offset, chunk);
+                    aq[n_aq].hdr_idx = n;
+                    aq[n_aq].payload_offset = offset;
+                    aq[n_aq].payload_len = chunk;
+                    n_aq++;
                     st.sampled_packets++;
+                    if (shm)
+                        atomic_fetch_add_explicit(&shm->sampled_packets, 1,
+                                                  memory_order_relaxed);
                 }
 
                 offset += chunk;
@@ -494,12 +546,43 @@ static void stream_loop(int vfd, int udp_fd, const struct sockaddr_in *dst,
                 running = 0;
                 break;
             }
-            for (int i = 0; i < sent; i++)
-                st.bytes += lens[i];
-            st.packets += (uint64_t)sent;
+            {
+                uint64_t batch_bytes = 0;
+                for (int i = 0; i < sent; i++) {
+                    batch_bytes += lens[i];
+                }
+                st.bytes += batch_bytes;
+                st.packets += (uint64_t)sent;
+                if (shm) {
+                    atomic_fetch_add_explicit(&shm->packets, (uint64_t)sent,
+                                              memory_order_relaxed);
+                    atomic_fetch_add_explicit(&shm->bytes, batch_bytes,
+                                              memory_order_relaxed);
+                }
+            }
+
+            /* Drain the analysis queue after the main send completes. */
+            for (unsigned int ai = 0; ai < n_aq; ai++) {
+                unsigned int i = aq[ai].hdr_idx;
+                struct radiocam_udp_header ahdr;
+                radiocam_udp_header_encode(
+                    &ahdr,
+                    radiocam_be16toh(hdrs[i].flags) | RADIOCAM_UDP_FLAG_ANALYSIS_SAMPLE,
+                    opt->stream_id, frame_id,
+                    radiocam_be32toh(hdrs[i].packet_id),
+                    radiocam_be32toh(hdrs[i].frame_offset),
+                    (uint32_t)aq[ai].payload_len,
+                    frame_timestamp_us, frame_cal_count);
+                send_analysis_packet(analysis_fd, analysis_dst, &ahdr,
+                                     base + aq[ai].payload_offset,
+                                     aq[ai].payload_len);
+            }
         }
 
         st.frames++;
+        if (shm)
+            atomic_fetch_add_explicit(&shm->frames, 1, memory_order_relaxed);
+
         if (xioctl(vfd, VIDIOC_QBUF, &buf) == -1) {
             perror("VIDIOC_QBUF");
             break;
@@ -522,6 +605,7 @@ int main(int argc, char **argv)
 {
     struct options opt;
     struct sockaddr_in dst, analysis_dst;
+    struct radiocam_shm_stats *shm;
     int vfd;
     int udp_fd;
     int analysis_fd = -1;
@@ -542,8 +626,15 @@ int main(int argc, char **argv)
         analysis_fd = make_udp_socket(opt.analysis_dest, opt.analysis_port, 0,
                                       &analysis_dst);
 
+    shm = setup_shm_stats();
+
     stream_loop(vfd, udp_fd, &dst, analysis_fd,
-                analysis_fd >= 0 ? &analysis_dst : NULL, &opt);
+                analysis_fd >= 0 ? &analysis_dst : NULL,
+                shm, &opt);
+
+    if (shm)
+        munmap(shm, sizeof(*shm));
+    shm_unlink(RADIOCAM_UDP_SHM_NAME);
 
     close(udp_fd);
     if (analysis_fd >= 0)

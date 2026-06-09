@@ -1,15 +1,30 @@
 #ifndef RADIOCAM_UDP_H
 #define RADIOCAM_UDP_H
 
+#include <stdatomic.h>
 #include <stdint.h>
 #include <string.h>
 
 #define RADIOCAM_UDP_MAGIC 0x52435531u /* "RCU1" */
 #define RADIOCAM_UDP_VERSION 1u
-#define RADIOCAM_UDP_HEADER_LEN 32u
+#define RADIOCAM_UDP_HEADER_LEN 48u
 #define RADIOCAM_UDP_FLAG_FRAME_START 0x0001u
 #define RADIOCAM_UDP_FLAG_FRAME_END 0x0002u
 #define RADIOCAM_UDP_FLAG_ANALYSIS_SAMPLE 0x0004u
+
+/* Shared memory stats region written by the sender, readable by monitors. */
+#define RADIOCAM_UDP_SHM_NAME "/radiocam_sender_stats"
+#define RADIOCAM_UDP_SHM_VERSION 1u
+
+struct radiocam_shm_stats {
+    uint32_t shm_version;
+    uint32_t _pad;
+    _Atomic uint64_t frames;
+    _Atomic uint64_t packets;
+    _Atomic uint64_t bytes;
+    _Atomic uint64_t sampled_packets;
+    _Atomic uint64_t frame_drops;
+};
 
 #define RADIOCAM_UDP_MTU_1500_PAYLOAD 1456u
 #define RADIOCAM_UDP_MTU_9000_PAYLOAD 8960u
@@ -26,6 +41,8 @@ struct radiocam_udp_header {
     uint32_t packet_id;
     uint32_t frame_offset;
     uint32_t payload_len;
+    uint64_t v4l2_timestamp_us;       /* µs since Unix epoch; OS-jitter, diagnostic only */
+    uint64_t calibrated_sample_count; /* raw_counter − time_offset; sample-clock precision */
 } __attribute__((packed));
 
 static inline uint16_t radiocam_bswap16(uint16_t v)
@@ -66,7 +83,8 @@ static inline uint64_t radiocam_bswap64(uint64_t v)
 static inline void radiocam_udp_header_encode(
     struct radiocam_udp_header *hdr, uint16_t flags, uint32_t stream_id,
     uint64_t frame_id, uint32_t packet_id, uint32_t frame_offset,
-    uint32_t payload_len)
+    uint32_t payload_len, uint64_t v4l2_timestamp_us,
+    uint64_t calibrated_sample_count)
 {
     hdr->magic = radiocam_htobe32(RADIOCAM_UDP_MAGIC);
     hdr->version = RADIOCAM_UDP_VERSION;
@@ -77,6 +95,8 @@ static inline void radiocam_udp_header_encode(
     hdr->packet_id = radiocam_htobe32(packet_id);
     hdr->frame_offset = radiocam_htobe32(frame_offset);
     hdr->payload_len = radiocam_htobe32(payload_len);
+    hdr->v4l2_timestamp_us = radiocam_htobe64(v4l2_timestamp_us);
+    hdr->calibrated_sample_count = radiocam_htobe64(calibrated_sample_count);
 }
 
 static inline int radiocam_udp_header_decode(
@@ -102,6 +122,9 @@ static inline int radiocam_udp_header_decode(
         out->version != RADIOCAM_UDP_VERSION ||
         out->header_len != RADIOCAM_UDP_HEADER_LEN)
         return -1;
+
+    out->v4l2_timestamp_us = radiocam_be64toh(in->v4l2_timestamp_us);
+    out->calibrated_sample_count = radiocam_be64toh(in->calibrated_sample_count);
 
     return 0;
 }
