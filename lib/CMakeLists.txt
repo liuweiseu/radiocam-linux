@@ -25,3 +25,6 @@ target_link_libraries(adc_config_test sdr_lib)
 # 3. Build the SECOND executable (e.g., your actual data capture app)
 add_executable(sdr_transfer_test sdr_test.c)
 target_link_libraries(sdr_transfer_test sdr_lib)
+
+add_executable(mipi_config_test mipi_config_test)
+target_link_libraries(mipi_config_test sdr_lib)

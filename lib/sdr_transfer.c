@@ -11,7 +11,7 @@
 
 #define VIDEO_DEVICE   "/dev/video0"
 #define CAM_WIDTH  2048 
-#define CAM_HEIGHT 1080
+#define CAM_HEIGHT 2556
 #define BUFFER_COUNT 3
 
 static int fd = -1;

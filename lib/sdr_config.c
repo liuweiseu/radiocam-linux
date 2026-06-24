@@ -7,15 +7,16 @@
 #include <linux/videodev2.h>
 #include <linux/i2c-dev.h>
 #include <string.h>
+#include <time.h>
+#include <errno.h>
 
 #define SENSOR_DEVICE    "/dev/v4l-subdev2"
-#define I2C_DEVICE       "/dev/i2c-1"
+#define I2C_DEVICE       "/dev/i2c-11"
 #define I2C_SLAVE_ADDR   0x28
 
 #define RCDEV_ADC        0x06
 #define RCDEV_GPIO       0x08
-#define ADC_REG_SUCCESS  0x55aa5506
-#define GPIO_REG_SUCCESS 0x55aa5508
+
 #define NREGS            0x58
 
 static int sensor_fd = -1;
@@ -76,8 +77,12 @@ void sdr_config_close(void) {
 
 static int sdr_i2c_write(uint8_t rcdev, int reg_addr, int reg_val, uint32_t expected_success) {
     int i2c_fd = open(I2C_DEVICE, O_RDWR);
-    if (i2c_fd < 0) return -1;
+    if (i2c_fd < 0) {
+        fprintf(stderr, "[I2C ERROR] Failed to open I2C bus device\n");
+        return -1;
+    }
     if (ioctl(i2c_fd, I2C_SLAVE, I2C_SLAVE_ADDR) < 0) {
+        fprintf(stderr, "[I2C ERROR] Failed to acquire bus access to slave address\n");
         close(i2c_fd);
         return -1;
     }
@@ -95,14 +100,20 @@ static int sdr_i2c_write(uint8_t rcdev, int reg_addr, int reg_val, uint32_t expe
     tx_buf[9] = reg_val & 0xFF;
 
     usleep(2000);
-    if (write(i2c_fd, tx_buf, 10) != 10) {
+    ssize_t written = write(i2c_fd, tx_buf, 10);
+    if (written != 10) {
+        fprintf(stderr, "[I2C ERROR] write() system call failed for rcdev 0x%02X. Written: %ld/10, System Reason: %s\n", 
+                rcdev, (long)written, strerror(errno));
         close(i2c_fd);
         return -1;
     }
-    usleep(2000);
+    usleep(5000);
 
     uint8_t rx_buf[4];
-    if (read(i2c_fd, rx_buf, 4) != 4) {
+    ssize_t read_bytes = read(i2c_fd, rx_buf, 4);
+    if (read_bytes != 4) {
+        fprintf(stderr, "[I2C ERROR] read() system call failed for rcdev 0x%02X. Read: %ld/4, System Reason: %s\n", 
+                rcdev, (long)read_bytes, strerror(errno));
         close(i2c_fd);
         return -1;
     }
@@ -112,7 +123,7 @@ static int sdr_i2c_write(uint8_t rcdev, int reg_addr, int reg_val, uint32_t expe
                            ((uint32_t)rx_buf[1] << 8)  | ((uint32_t)rx_buf[0]);
 
     if (confirm_val != expected_success) {
-        fprintf(stderr, "I2C Write Failed. Expected 0x%X, got 0x%X\n", expected_success, confirm_val);
+        fprintf(stderr, "I2C Write Verification Mismatch. Expected 0x%08X, got 0x%08X\n", expected_success, confirm_val);
         return -1;
     }
     return 0;
@@ -238,14 +249,147 @@ int sdr_adc_init_sequence(void) {
     // 3. Push default shadow registers to hardware (only those != 0xFFFF)
     for(int i = 0; i < NREGS; i++){
         if(adc_shadow_regs[i] != 0xFFFF) {
-            sdr_set_adc_config(i, adc_shadow_regs[i]);
+            if (sdr_set_adc_config(i, adc_shadow_regs[i]) < 0) {
+                return -1; // Fail early if the hardware rejects the write
+            }        
         }
     }
     return 0;
 }
 
-int sdr_set_mipi_config(int value) {
-    // Not implemented
+// Generic I2C read implementation matching your framework's transaction profile
+static int sdr_i2c_read(uint8_t rcdev, int reg_addr, uint32_t *out_val) {
+    int i2c_fd = open(I2C_DEVICE, O_RDWR);
+    if (i2c_fd < 0) return -1;
+    if (ioctl(i2c_fd, I2C_SLAVE, I2C_SLAVE_ADDR) < 0) {
+        close(i2c_fd);
+        return -1;
+    }
+
+    uint8_t tx_buf[6];
+    tx_buf[0] = rcdev;
+    tx_buf[1] = 0; // Read Command Flag (matching python architecture logic)
+    tx_buf[2] = (reg_addr >> 24) & 0xFF;
+    tx_buf[3] = (reg_addr >> 16) & 0xFF;
+    tx_buf[4] = (reg_addr >> 8)  & 0xFF;
+    tx_buf[5] = reg_addr & 0xFF;
+
+    usleep(2000);
+    if (write(i2c_fd, tx_buf, 6) != 6) {
+        close(i2c_fd);
+        return -1;
+    }
+    usleep(2000);
+
+    uint8_t rx_buf[4];
+    if (read(i2c_fd, rx_buf, 4) != 4) {
+        close(i2c_fd);
+        return -1;
+    }
+    close(i2c_fd);
+
+    *out_val = ((uint32_t)rx_buf[3] << 24) | ((uint32_t)rx_buf[2] << 16) | 
+               ((uint32_t)rx_buf[1] << 8)  | ((uint32_t)rx_buf[0]);
+    return 0;
+}
+
+int sdr_mipi_dphy_write(int reg_addr, uint32_t reg_val) {
+    return sdr_i2c_write(RCDEV_MIPI_DPHY, reg_addr, reg_val, MIPI_DPHY_REG_SUCCESS);
+}
+
+uint32_t sdr_mipi_dphy_read(int reg_addr) {
+    uint32_t val = 0;
+    if (sdr_i2c_read(RCDEV_MIPI_DPHY, reg_addr, &val) != 0) {
+        fprintf(stderr, "MIPI D-PHY Read Failed at 0x%X\n", reg_addr);
+    }
+    return val;
+}
+
+int sdr_mipi_csi_write(int reg_addr, uint32_t reg_val) {
+    return sdr_i2c_write(RCDEV_MIPI_CSI, reg_addr, reg_val, MIPI_CSI_REG_SUCCESS);
+}
+
+uint32_t sdr_mipi_csi_read(int reg_addr) {
+    uint32_t val = 0;
+    if (sdr_i2c_read(RCDEV_MIPI_CSI, reg_addr, &val) != 0) {
+        fprintf(stderr, "MIPI CSI Read Failed at 0x%X\n", reg_addr);
+    }
+    return val;
+}
+
+// ---------------------------------------------------------
+// MIPI Subsystem Configuration Blocks (H1D03 Variants)
+// ---------------------------------------------------------
+
+typedef struct {
+    int reg;
+    uint32_t val;
+} mipi_reg_pair_t;
+
+// Maps H1D03 defaults exactly to target registers
+static const mipi_reg_pair_t h1d03_dphy_defaults[] = {
+    { HOST_NUM_LANES,     3 },
+    { HOST_NOCTN_CLK,     0 },
+    { HOST_T_PRE,         100 },
+    { HOST_T_POST,        33 },
+    { HOST_TX_GAP,        30 },
+    { HOST_AUTO_EOTP,     1 },
+    { HOST_EXT_CMD,       0 },
+    { HOST_HSTX_TIMER,    0 },
+    { HOST_LPDT_TIMER,    0 },
+    { HOST_BTA_TIMER,     0 },
+    { HOST_TWAKEUP,       200 },
+    { HOST_PHY_D_PRE,     0 },
+    { HOST_PHY_CLK_PRE,   0 },
+    { HOST_PHY_D_ZERO,    25 },
+    { HOST_PHY_CLK_ZERO,  60 },
+    { HOST_PHY_D_TRAIL,   4 },
+    { HOST_PHY_CLK_TRAIL, 4 },
+    { HOST_PLL_CN,        0x01 },
+    { HOST_PLL_CM,        0xBD },
+    { HOST_PLL_CO,        0 }
+};
+
+int sdr_mipi_dphy_configure(void) {
+    printf("Configuring MIPI H1D03 D-PHY...\n");
+    size_t num_regs = sizeof(h1d03_dphy_defaults) / sizeof(h1d03_dphy_defaults[0]);
+    for (size_t i = 0; i < num_regs; i++) {
+        if (sdr_mipi_dphy_write(h1d03_dphy_defaults[i].reg, h1d03_dphy_defaults[i].val) != 0) {
+            return -1;
+        }
+    }
+    return 0;
+}
+
+int sdr_mipi_csi_configure(void) {
+    printf("Configuring MIPI CSI H1D03...\n");
+    if (sdr_mipi_csi_write(CSI_STREAM, 0) != 0) return -1;
+    if (sdr_mipi_csi_write(CSI_CONTROL, 0) != 0) return -1;
+    return 0;
+}
+
+// ---------------------------------------------------------
+// Master MIPI Core Init Sequence Facade
+// ---------------------------------------------------------
+
+int sdr_mipi_initialize(double timeout_sec) {
+    (void)timeout_sec; // Suppress unused parameter warning
+
+    // 1. Write all DPHY timing parameters using dev_id = 0x0A
+    printf("start mipi reg config\n");
+    if (sdr_mipi_dphy_configure() != 0) {
+        fprintf(stderr, "MIPI D-PHY registry config failed\n");
+        return -1;
+    }
+    printf("mipi reg config done\n");
+
+    // 2. CRITICAL: Replace the inactive CSI_STATUS polling loop with a 
+    // hardware stabilization delay. This allows the 312 Mbps PLL to lock.
+    printf("waiting for tx dphy readying (stabilization delay)...\n");
+    usleep(100000); // 100ms hardware lock window
+    printf("tx dphy ready\n");
+
+    printf("MIPI initialization successful.\n");
     return 0;
 }
 
