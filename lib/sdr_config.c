@@ -162,22 +162,26 @@ int sdr_set_adc_field(int reg_addr, int bit_loc, int bit_width, int val, int wri
 }
 
 int sdr_adc_soft_reset(int on) {
+    int ret = 0;
     if (on) {
-        sdr_set_adc_field(ADC_FLD_RST, 1, 1);
+        ret |= sdr_set_adc_field(ADC_FLD_RST, 1, 1);
         usleep(100000);
-        sdr_set_adc_field(ADC_FLD_PD, 1, 1);
+        ret |= sdr_set_adc_field(ADC_FLD_PD, 1, 1);
         usleep(100000);
-        // RST=1, PD=0, RST_IOB=1
-        sdr_gpio_write_reg(0x00, (1 << 0) | (0 << 1) | (1 << 2));
+        ret |= sdr_gpio_write_reg(0x00, (1 << 0) | (0 << 1) | (1 << 2));
         usleep(100000);
     } else {
         usleep(100000);
-        // RST=1, PD=0, RST_IOB=0
-        sdr_gpio_write_reg(0x00, (1 << 0) | (0 << 1) | (0 << 2));
+        ret |= sdr_gpio_write_reg(0x00, (1 << 0) | (0 << 1) | (0 << 2));
         usleep(100000);
-        sdr_set_adc_field(ADC_FLD_PD, 0, 1);
+        ret |= sdr_set_adc_field(ADC_FLD_PD, 0, 1);
+        ret |= sdr_set_adc_field(ADC_FLD_RST, 0, 1);
     }
-    return 0;
+
+    if (ret != 0) {
+        fprintf(stderr, "[ERROR] sdr_adc_soft_reset(%d) encountered I2C write errors!\n", on);
+    }
+    return ret;
 }
 
 // Exactly mirrors your Python Notebook Configuration
@@ -373,23 +377,35 @@ int sdr_mipi_csi_configure(void) {
 // ---------------------------------------------------------
 
 int sdr_mipi_initialize(double timeout_sec) {
-    (void)timeout_sec; // Suppress unused parameter warning
+    (void)timeout_sec;
 
-    // 1. Write all DPHY timing parameters using dev_id = 0x0A
-    printf("start mipi reg config\n");
+    // 1. Reset control flags
+    printf("[MIPI] Resetting CSI control flags...\n");
+    sdr_mipi_csi_write(CSI_STREAM, 0);
+    sdr_mipi_csi_write(CSI_CONTROL, 0);
+
+    // 2. Program D-PHY timing registers (RCDEV 0x0A)
+    printf("[MIPI] Programming D-PHY parameters...\n");
     if (sdr_mipi_dphy_configure() != 0) {
-        fprintf(stderr, "MIPI D-PHY registry config failed\n");
+        fprintf(stderr, "[ERROR] MIPI D-PHY registry config failed\n");
         return -1;
     }
-    printf("mipi reg config done\n");
 
-    // 2. CRITICAL: Replace the inactive CSI_STATUS polling loop with a 
-    // hardware stabilization delay. This allows the 312 Mbps PLL to lock.
-    printf("waiting for tx dphy readying (stabilization delay)...\n");
-    usleep(100000); // 100ms hardware lock window
-    printf("tx dphy ready\n");
+    // 3. Assert resets on the FPGA MIPI block
+    uint32_t ctrl_mask = CSI_CTRL_RSTN_ALL | CSI_CTRL_RSTN_MIPI | CSI_CTRL_RESET_DPI_N;
+    sdr_mipi_csi_write(CSI_CONTROL, ctrl_mask);
 
-    printf("MIPI initialization successful.\n");
+    // 4. Clock lock window (replaces the broken read-polling loop)
+    usleep(100000); // 100ms delay
+
+    // 5. CRITICAL: Trigger STREAM ON (0x8818 -> 1)
+    printf("[MIPI] Sending STREAM ON trigger to FPGA...\n");
+    if (sdr_mipi_csi_write(CSI_STREAM, CSI_STREAM_ON) != 0) {
+        fprintf(stderr, "[ERROR] Failed to send CSI_STREAM_ON to FPGA!\n");
+        return -1;
+    }
+
+    printf("[MIPI] Transceiver active and streaming.\n");
     return 0;
 }
 

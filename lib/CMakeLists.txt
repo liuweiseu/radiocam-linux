@@ -13,7 +13,7 @@ set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -Wall -Wextra")
 
 # 1. Create a library out of ALL your core SDR files
 # We simply add sdr_transfer.c to the list of source files here.
-add_library(sdr_lib STATIC 
+add_library(sdr_lib STATIC
     sdr_config.c
     sdr_transfer.c
 )
@@ -22,9 +22,9 @@ add_library(sdr_lib STATIC
 add_executable(adc_config_test adc_config_test.c)
 target_link_libraries(adc_config_test sdr_lib)
 
-# 3. Build the SECOND executable (e.g., your actual data capture app)
-add_executable(sdr_transfer_test sdr_test.c)
-target_link_libraries(sdr_transfer_test sdr_lib)
-
-add_executable(mipi_config_test mipi_config_test)
+# 3. Build the SECOND executable
+add_executable(mipi_config_test mipi_config_test.c)
 target_link_libraries(mipi_config_test sdr_lib)
+
+add_executable(sdr_capture_all sdr_capture_all.c)
+target_link_libraries(sdr_capture_all sdr_lib)
