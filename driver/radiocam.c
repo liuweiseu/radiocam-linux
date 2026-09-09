@@ -30,13 +30,14 @@
 
 #define RADIOCAM_NAME "radiocam"
 #define DRIVER_VERSION KERNEL_VERSION(0, 0x02, 0x02)
+#define DRIVER_VERSION_SUFFIX "-dev"
 
 #define RADIOCAM_LINK_FREQ 156250000
-/* actual pixel rate provided by hardware: 75 MHz */
+/* actual pixel rate provided by hardware: 125 MHz */
 //#define RADIOCAM_PIXEL_RATE 40000000ULL
 #define RADIOCAM_PIXEL_RATE   125000000ULL
 
-#define RADIOCAM_LANES 4
+#define RADIOCAM_LANES 1
 #define RADIOCAM_VBLANK 4
 
     static const s64 link_freq_menu_items[] = {
@@ -489,7 +490,7 @@ static int radiocam_g_mbus_config(struct v4l2_subdev *sd, unsigned int pad_id,
                                   struct v4l2_mbus_config *config)
 {
     config->type = V4L2_MBUS_CSI2_DPHY;
-    config->bus.mipi_csi2.num_data_lanes = 4;
+    config->bus.mipi_csi2.num_data_lanes = RADIOCAM_LANES;
     return 0;
 }
 
@@ -699,10 +700,11 @@ static int radiocam_probe(struct i2c_client *client,
     struct v4l2_subdev *sd;
     int ret;
 
-    dev_info(dev, "driver version: %02x.%02x.%02x",
+    dev_info(dev, "driver version: %02x.%02x.%02x%s",
              DRIVER_VERSION >> 16,
              (DRIVER_VERSION & 0xff00) >> 8,
-             DRIVER_VERSION & 0x00ff);
+             DRIVER_VERSION & 0x00ff,
+             DRIVER_VERSION_SUFFIX);
 
     radiocam = devm_kzalloc(dev, sizeof(*radiocam), GFP_KERNEL);
     if (!radiocam)
@@ -817,4 +819,4 @@ module_exit(sensor_mod_exit);
 
 MODULE_DESCRIPTION("UCB-RAL radiocam driver");
 MODULE_LICENSE("GPL v2");
-MODULE_VERSION("0.2.2");
+MODULE_VERSION("0.2.2" DRIVER_VERSION_SUFFIX);
