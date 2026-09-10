@@ -29,8 +29,8 @@
 #include "radiocam.h"
 
 #define RADIOCAM_NAME "radiocam"
-#define DRIVER_VERSION KERNEL_VERSION(0, 0x02, 0x02)
-#define DRIVER_VERSION_SUFFIX "-dev"
+#define DRIVER_VERSION KERNEL_VERSION(0, 0x02, 0x03)
+#define DRIVER_VERSION_SUFFIX ""
 
 #define RADIOCAM_LINK_FREQ 156250000
 /* actual pixel rate provided by hardware: 125 MHz */
@@ -819,4 +819,4 @@ module_exit(sensor_mod_exit);
 
 MODULE_DESCRIPTION("UCB-RAL radiocam driver");
 MODULE_LICENSE("GPL v2");
-MODULE_VERSION("0.2.2" DRIVER_VERSION_SUFFIX);
+MODULE_VERSION("0.2.3" DRIVER_VERSION_SUFFIX);
