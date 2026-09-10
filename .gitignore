@@ -1,0 +1,13 @@
+# Kernel module build artifacts (driver/)
+driver/*.o
+driver/*.ko
+driver/*.mod
+driver/*.mod.c
+driver/*.mod.o
+driver/.*.cmd
+driver/modules.order
+driver/Module.symvers
+driver/.tmp_versions/
+
+# Device tree overlay build artifacts (dts/)
+dts/*.dtbo
