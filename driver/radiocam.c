@@ -7,7 +7,6 @@
  * V0.0.1 implemented i2c control.
  */
 
-#include <linux/clk.h>
 #include <linux/device.h>
 #include <linux/delay.h>
 #include <linux/gpio/consumer.h>
@@ -29,12 +28,12 @@
 #include "radiocam.h"
 
 #define RADIOCAM_NAME "radiocam"
-#define DRIVER_VERSION KERNEL_VERSION(0, 0x02, 0x03)
+#define DRIVER_VERSION KERNEL_VERSION(0, 0x02, 0x04)
 #define DRIVER_VERSION_SUFFIX ""
 
-#define RADIOCAM_LINK_FREQ 156250000
+/* 156250000 * 4, to keep the same total bandwidth after dropping from 4 lanes to 1 */
+#define RADIOCAM_LINK_FREQ 625000000
 /* actual pixel rate provided by hardware: 125 MHz */
-//#define RADIOCAM_PIXEL_RATE 40000000ULL
 #define RADIOCAM_PIXEL_RATE   125000000ULL
 
 #define RADIOCAM_LANES 1
@@ -618,12 +617,12 @@ static int radiocam_initialize_controls(struct radiocam *radiocam)
     if (radiocam->vblank)
         radiocam->vblank->flags |= V4L2_CTRL_FLAG_VOLATILE;
 
-    /* pixel rate — read-only, 75 MHz as provided by hardware */
+    /* pixel rate — read-only, fixed at RADIOCAM_PIXEL_RATE */
     v4l2_ctrl_new_std(handler, NULL,
                       V4L2_CID_PIXEL_RATE,
                       0, RADIOCAM_PIXEL_RATE, 1, RADIOCAM_PIXEL_RATE);
 
-    /* link frequency — read-only, fixed at 320MHz to match hardware */
+    /* link frequency — read-only, fixed at RADIOCAM_LINK_FREQ */
     ctrl = v4l2_ctrl_new_int_menu(handler, NULL,
                                   V4L2_CID_LINK_FREQ,
                                   ARRAY_SIZE(link_freq_menu_items) - 1,
@@ -819,4 +818,4 @@ module_exit(sensor_mod_exit);
 
 MODULE_DESCRIPTION("UCB-RAL radiocam driver");
 MODULE_LICENSE("GPL v2");
-MODULE_VERSION("0.2.3" DRIVER_VERSION_SUFFIX);
+MODULE_VERSION("0.2.4" DRIVER_VERSION_SUFFIX);
