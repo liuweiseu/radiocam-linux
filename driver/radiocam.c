@@ -29,7 +29,7 @@
 #include "radiocam.h"
 
 #define RADIOCAM_NAME "radiocam"
-#define DRIVER_VERSION KERNEL_VERSION(0, 0x02, 0x01)
+#define DRIVER_VERSION KERNEL_VERSION(0, 0x02, 0x02)
 
 #define RADIOCAM_LINK_FREQ 156250000
 /* actual pixel rate provided by hardware: 75 MHz */
@@ -125,8 +125,8 @@ static int radiocam_read_reg(struct i2c_client *client, u8 dev_id, u32 addr, u32
     ret = i2c_transfer(client->adapter, msgs, ARRAY_SIZE(msgs));
     if (ret != ARRAY_SIZE(msgs))
         return -EIO;
-    /* wait for 4ms */
-    usleep_range(5000, 5500);
+    /* wait for 8ms */
+    usleep_range(8000, 8500);
     /* Read data from register */
     msgs[0].addr = client->addr;
     msgs[0].flags = I2C_M_RD;
@@ -166,8 +166,8 @@ static int radiocam_write_reg(struct i2c_client *client, u8 dev_id, u32 addr, u3
     ret = i2c_transfer(client->adapter, msgs, ARRAY_SIZE(msgs));
     if (ret != ARRAY_SIZE(msgs))
         return -EIO;
-    /* wait for 5ms */
-    usleep_range(5000, 5500);
+    /* wait for 8ms */
+    usleep_range(8000, 8500);
     /* Read data from register */
     msgs[0].addr = client->addr;
     msgs[0].flags = I2C_M_RD;
@@ -817,4 +817,4 @@ module_exit(sensor_mod_exit);
 
 MODULE_DESCRIPTION("UCB-RAL radiocam driver");
 MODULE_LICENSE("GPL v2");
-MODULE_VERSION("0.2.1");
+MODULE_VERSION("0.2.2");
