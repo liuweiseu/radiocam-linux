@@ -1,0 +1,10 @@
+# radiocam four-lane build sweep
+# lanes = 4, data-lanes = <1 2 3 4>
+# pixel_rate = total_bit_rate / 10   (total = per-lane rate x 4)
+#
+# dir      link_freq    per-lane   total      pixel_rate   fps       max_fps{num,den}
+  312.5M   156250000    312.5Mbps  1250Mbps   125000000    19.1033   {20448,390625}
+  625M     312500000    625Mbps    2500Mbps   250000000    38.2067   {10224,390625}
+  700M     350000000    700Mbps    2800Mbps   280000000    42.7915   {2556,109375}
+  800M     400000000    800Mbps    3200Mbps   320000000    48.9045   {639,31250}
+  1000M    500000000    1000Mbps   4000Mbps   400000000    61.1307   {1278,78125}

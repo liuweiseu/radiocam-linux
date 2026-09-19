@@ -1,0 +1,8 @@
+lanes              : 4
+per-lane bit rate  : 625 Mbps
+total bit rate     : 2500 Mbps
+RADIOCAM_LINK_FREQ : 312500000
+link-frequencies   : 312500000
+RADIOCAM_PIXEL_RATE: 250000000
+max_fps            : {10224, 390625}
+fps                : 38.2067

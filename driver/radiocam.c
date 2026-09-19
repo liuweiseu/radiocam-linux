@@ -31,12 +31,12 @@
 #define DRIVER_VERSION KERNEL_VERSION(0, 0x02, 0x04)
 #define DRIVER_VERSION_SUFFIX ""
 
-/* 156250000 * 4, to keep the same total bandwidth after dropping from 4 lanes to 1 */
-#define RADIOCAM_LINK_FREQ 625000000
-/* actual pixel rate provided by hardware: 125 MHz */
-#define RADIOCAM_PIXEL_RATE   125000000ULL
+/* half the per-lane bit rate: rkcif's csi2-dphy does data_rate_mbps = link_freq * 2 (DDR) */
+#define RADIOCAM_LINK_FREQ 500000000
+/* pixel rate = total MIPI bit rate / 10 (total = per-lane rate x RADIOCAM_LANES) */
+#define RADIOCAM_PIXEL_RATE   400000000ULL
 
-#define RADIOCAM_LANES 1
+#define RADIOCAM_LANES 4
 #define RADIOCAM_VBLANK 4
 
     static const s64 link_freq_menu_items[] = {
@@ -87,8 +87,8 @@ static const struct radiocam_mode supported_modes[] = {
         .width = 2048,
         .height = 2556,
         .max_fps = {
-            .numerator = 81792,
-            .denominator = 1953125,
+            .numerator = 1278,
+            .denominator = 78125,
         },
         .exp_def = 0x0440,
         .hts_def = 2556, /* HS(64) + HBP(260) + HDISP(2048) + HFP(20) + 164 ((10+31)*4) */
